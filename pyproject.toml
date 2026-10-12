@@ -1,0 +1,26 @@
+[project]
+name = "iotdesign"
+version = "0.1.0"
+description = "Local phone-to-PC room reconstruction"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20",
+  "pillow>=11,<13", "numpy>=2,<3", "cryptography>=44", "zeroconf>=0.145",
+  "qrcode[pil]>=8", "psutil>=6", "viser>=1,<2", "plyfile>=1"
+]
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.28", "ruff>=0.11"]
+gpu = ["torch>=2.6", "torchvision>=0.21", "huggingface-hub>=0.28", "einops>=0.8", "safetensors>=0.5"]
+semantic = ["ultralytics==8.4.175", "transformers==5.19.0"]
+[project.scripts]
+iotdesign = "iotdesign.cli:main"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["server/iotdesign"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 110
+target-version = "py310"

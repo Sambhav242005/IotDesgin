@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0d12" />
+    <title>IoTDesign — Room reconstruction</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.181.2/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.181.2/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0d12;
+        --panel: rgba(15, 20, 27, 0.9);
+        --line: rgba(230, 238, 250, 0.09);
+        --muted: #8d98a8;
+        --text: #edf2f7;
+        --mint: #b7f36b;
+        --blue: #81b8ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+      body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); }
+      button, input { font: inherit; }
+      .app { height: 100%; display: grid; grid-template-rows: 64px 1fr; background: radial-gradient(ellipse at 47% 47%, #17202b 0%, #0c1118 48%, #090c11 100%); }
+      .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid var(--line); background: rgba(9, 12, 17, .82); z-index: 2; }
+      .brand { display: flex; align-items: center; gap: 11px; letter-spacing: .02em; font-size: 14px; font-weight: 650; }
+      .brand-mark { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid rgba(183,243,107,.42); border-radius: 8px; color: var(--mint); font-size: 14px; }
+      .crumb { color: var(--muted); font-size: 12px; font-weight: 450; margin-left: 4px; }
+      .top-right { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+      .live-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px rgba(183,243,107,.65); margin-right: 5px; }
+      .workspace { position: relative; min-height: 0; }
+      #stage { position: absolute; inset: 0; }
+      #stage canvas { display: block; width: 100%; height: 100%; outline: none; }
+      .scene-label { position: absolute; left: 28px; top: 25px; pointer-events: none; }
+      .eyebrow { color: var(--mint); font-size: 10px; letter-spacing: .17em; text-transform: uppercase; font-weight: 720; }
+      .scene-label h1 { margin: 8px 0 4px; font-size: 20px; line-height: 1.2; font-weight: 560; letter-spacing: -.035em; }
+      .scene-label p { margin: 0; color: var(--muted); font-size: 11px; }
+      .scene-chip { display: inline-flex; align-items: center; gap: 7px; margin-top: 14px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: rgba(11,15,21,.67); color: #bac4d0; font-size: 10px; backdrop-filter: blur(12px); }
+      .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: #f1be66; }
+      .control-hint { position: absolute; left: 50%; bottom: 25px; transform: translateX(-50%); display: flex; gap: 18px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: rgba(11,15,21,.7); color: #aab4c1; font-size: 10px; backdrop-filter: blur(14px); pointer-events: none; white-space: nowrap; }
+      .control-hint b { color: #e9eef3; font-weight: 550; }
+      .rail { position: absolute; top: 18px; right: 18px; bottom: 18px; width: 282px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+      .card { pointer-events: auto; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); backdrop-filter: blur(20px); box-shadow: 0 16px 50px rgba(0,0,0,.22); }
+      .summary { padding: 16px; }
+      .card-kicker { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .15em; font-weight: 680; }
+      .summary h2 { margin: 8px 0 2px; font-size: 15px; font-weight: 560; letter-spacing: -.015em; }
+      .summary-sub { color: var(--muted); font-size: 10px; }
+      .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 15px; }
+      .stat { padding: 10px 9px; border: 1px solid rgba(255,255,255,.055); border-radius: 8px; background: rgba(255,255,255,.025); }
+      .stat-label { color: var(--muted); font-size: 9px; }
+      .stat-value { margin-top: 5px; font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 560; }
+      .stat-unit { color: var(--muted); font-size: 9px; margin-left: 3px; font-weight: 450; }
+      .section { padding: 14px 15px; }
+      .section-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .section-title { font-size: 11px; font-weight: 570; }
+      .section-note { color: var(--muted); font-size: 9px; }
+      .button-row { display: flex; gap: 7px; }
+      .control-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 10px; color: #d9e1ea; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: rgba(255,255,255,.045); cursor: pointer; font-size: 10px; transition: background .16s, border-color .16s, transform .16s; }
+      .control-btn:hover { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.2); }
+      .control-btn:active { transform: translateY(1px); }
+      .control-btn.active { color: var(--mint); border-color: rgba(183,243,107,.32); background: rgba(183,243,107,.08); }
+      .control-btn.primary { flex: 1; color: #11160b; background: var(--mint); border-color: var(--mint); font-weight: 670; }
+      .control-btn.primary:hover { background: #c7ff7d; }
+      .icon { width: 13px; height: 13px; display: block; }
+      .zoom-line { display: grid; grid-template-columns: 30px 1fr 30px; gap: 9px; align-items: center; }
+      .zoom-btn { width: 30px; height: 29px; padding: 0; font-size: 16px; }
+      input[type=range] { width: 100%; accent-color: var(--mint); cursor: pointer; }
+      .zoom-labels { display: flex; justify-content: space-between; margin: 5px 39px 0; color: #737f8d; font-size: 8px; }
+      .path-toggle { display: flex; align-items: center; justify-content: space-between; margin-top: 13px; color: #b7c1cc; font-size: 10px; }
+      .switch { position: relative; width: 28px; height: 16px; border: 0; border-radius: 99px; background: #36404a; cursor: pointer; transition: .18s; }
+      .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; background: #bbc4ce; border-radius: 50%; transition: .18s; }
+      .switch[aria-checked=true] { background: rgba(183,243,107,.5); }
+      .switch[aria-checked=true]::after { left: 15px; background: var(--mint); }
+      .frames { padding: 14px 15px 13px; }
+      .frame-readout { color: var(--blue); font-size: 10px; font-variant-numeric: tabular-nums; }
+      .frame-range { margin: 2px 0 4px; }
+      .frame-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; }
+      .notice { margin-top: auto; padding: 12px 13px; color: #aab5c1; font-size: 9px; line-height: 1.55; }
+      .notice strong { display: block; margin-bottom: 4px; color: #e8c27c; font-size: 10px; font-weight: 600; }
+      #loading { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(14,20,28,.38), rgba(8,11,16,.9)); z-index: 4; transition: opacity .3s; }
+      #loading.hidden { opacity: 0; pointer-events: none; }
+      .loader-card { width: min(340px, calc(100vw - 40px)); padding: 21px; border: 1px solid var(--line); border-radius: 12px; background: #10161e; box-shadow: 0 20px 60px #0008; }
+      .loader-title { font-size: 13px; font-weight: 600; }
+      .loader-message { margin-top: 6px; color: var(--muted); font-size: 10px; }
+      .progress { height: 3px; margin-top: 16px; border-radius: 10px; background: #26303b; overflow: hidden; }
+      .progress::after { content: ""; display: block; width: 42%; height: 100%; border-radius: inherit; background: var(--mint); animation: load 1.1s ease-in-out infinite alternate; }
+      @keyframes load { to { transform: translateX(138%); } }
+      .error { color: #ffb4a9; }
+      @media (max-width: 760px) {
+        .app { grid-template-rows: 56px 1fr; }
+        .topbar { padding: 0 15px; }
+        .crumb, .top-right .right-label { display: none; }
+        .rail { top: auto; left: 10px; right: 10px; bottom: 10px; width: auto; display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 7px; }
+        .summary { grid-column: 1 / -1; padding: 10px 12px; }
+        .summary h2 { margin-top: 4px; }
+        .stats { margin-top: 8px; gap: 5px; }
+        .stat { padding: 7px; }
+        .stat-value { margin-top: 3px; font-size: 12px; }
+        .section { padding: 10px; }
+        .frames { padding: 10px; }
+        .notice { display: none; }
+        .scene-label { left: 14px; top: 14px; }
+        .scene-label h1 { font-size: 16px; }
+        .control-hint { left: 14px; bottom: 232px; transform: none; gap: 9px; font-size: 9px; }
+      }
+      @media (max-width: 420px) {
+        .rail { grid-template-columns: 1fr; max-height: 56vh; overflow-y: auto; }
+        .summary { grid-column: auto; }
+        .control-hint { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">✳</span><span>IoTDesign</span><span class="crumb">/ Room reconstruction</span></div>
+        <div class="top-right"><span><i class="live-dot"></i><span id="status">Loading scene</span></span><span class="right-label">·</span><span class="right-label">LOCAL VIEWER</span></div>
+      </header>
+      <main class="workspace">
+        <div id="stage" aria-label="Interactive 3D point cloud viewer"></div>
+        <div class="scene-label">
+          <div class="eyebrow">Scan 7578017 · 20 views</div>
+          <h1>People entering a house</h1>
+          <p>VGGT depth reconstruction · color point cloud</p>
+          <div class="scene-chip"><i class="chip-dot"></i> Partial geometry · unscaled</div>
+        </div>
+        <div class="control-hint"><span><b>Drag</b> orbit</span><span><b>Right-drag</b> pan</span><span><b>Scroll</b> zoom</span></div>
+        <aside class="rail">
+          <section class="card summary">
+            <div class="card-kicker">Reconstruction details</div>
+            <h2>VGGT · colored point cloud</h2>
+            <div class="summary-sub">Coordinates are estimated and unscaled</div>
+            <div class="stats">
+              <div class="stat"><div class="stat-label">Points</div><div class="stat-value" id="pointCount">—</div></div>
+              <div class="stat"><div class="stat-label">Capture views</div><div class="stat-value" id="cameraCount">—</div></div>
+              <div class="stat"><div class="stat-label">Inference</div><div class="stat-value" id="runtime">—</div></div>
+              <div class="stat"><div class="stat-label">Peak VRAM</div><div class="stat-value" id="vram">—</div></div>
+            </div>
+          </section>
+          <section class="card section">
+            <div class="section-head"><div class="section-title">Explore the scene</div><div class="section-note">LIVE 3D</div></div>
+            <div class="button-row">
+              <button class="control-btn active" id="orbitButton" type="button" aria-pressed="true">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20.2 8A8.5 8.5 0 0 0 4.1 6.5L2.5 9"/><path d="M2.5 4.5V9h4.5M3.8 16A8.5 8.5 0 0 0 19.9 17.5l1.6-2.5"/><path d="M21.5 19.5V15H17"/></svg>
+                Auto orbit
+              </button>
+              <button class="control-btn" id="resetButton" type="button" title="Reset camera">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 11a9 9 0 1 1 2.6 6.4L3 15"/><path d="M3 20v-5h5"/></svg>
+                Reset
+              </button>
+            </div>
+            <a class="control-btn" style="width:100%; margin-top:8px; text-decoration:none" href="../../data/benchmark/pexels-7578017-results/20/cloud.ply" download="iotdesign-pexels-7578017-cloud.ply">Download point cloud (.PLY)</a>
+            <div class="section-head" style="margin:16px 0 8px"><div class="section-title">Zoom</div><div class="section-note" id="zoomValue">100%</div></div>
+            <div class="zoom-line">
+              <button class="control-btn zoom-btn" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+              <input id="zoomRange" type="range" min="0" max="100" value="48" aria-label="Zoom level" />
+              <button class="control-btn zoom-btn" id="zoomIn" type="button" aria-label="Zoom in">+</button>
+            </div>
+            <div class="zoom-labels"><span>Far</span><span>Close</span></div>
+            <div class="path-toggle"><span>Estimated camera path</span><button id="pathSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-label="Show estimated camera path"></button></div>
+          </section>
+          <section class="card frames">
+            <div class="section-head"><div class="section-title">Captured viewpoints</div><div class="frame-readout" id="frameReadout">01 / 20</div></div>
+            <input id="frameRange" class="frame-range" type="range" min="0" max="19" value="0" aria-label="Selected captured viewpoint" />
+            <div class="frame-meta"><span>Estimated camera path</span><span id="frameName">Frame 01</span></div>
+          </section>
+          <section class="card notice"><strong>About this result</strong>This source is a mostly fixed shot at a doorway. Moving people overlap the background, so this point cloud is useful for testing the viewer—not for measuring or laying out a room.</section>
+        </aside>
+        <div id="loading"><div class="loader-card"><div class="loader-title">Preparing the 3D scene</div><div id="loadMessage" class="loader-message">Loading point cloud and camera estimates…</div><div class="progress"></div></div></div>
+      </main>
+    </div>
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+      import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+
+      const assetBase = '../../data/benchmark/pexels-7578017-results/20/';
+      const stage = document.querySelector('#stage');
+      const status = document.querySelector('#status');
+      const loadMessage = document.querySelector('#loadMessage');
+      const loading = document.querySelector('#loading');
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#0b1017');
+      const camera = new THREE.PerspectiveCamera(42, 1, 0.01, 100);
+      camera.up.set(0, -1, 0);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setClearColor('#0b1017', 1);
+      stage.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.075;
+      controls.autoRotate = true;
+      controls.autoRotateSpeed = 0.65;
+      controls.minDistance = 0.16;
+      controls.maxDistance = 8;
+      controls.screenSpacePanning = true;
+      controls.target.set(0, 0, 0);
+
+      const ambient = new THREE.HemisphereLight(0xb9d3ef, 0x18212c, 1.7);
+      scene.add(ambient);
+      const keyLight = new THREE.DirectionalLight(0xd8e8ff, 1.3);
+      keyLight.position.set(-2.5, -3, 4);
+      scene.add(keyLight);
+
+      const pathGroup = new THREE.Group();
+      pathGroup.visible = true;
+      scene.add(pathGroup);
+      let initialDistance = 1.8;
+      let cameraPositions = [];
+      let cameraMarkers = [];
+      let sceneExtent = 1;
+
+      function setZoomSliderFromCamera() {
+        const distance = camera.position.distanceTo(controls.target);
+        const fraction = THREE.MathUtils.clamp(
+          Math.log(controls.maxDistance / distance) / Math.log(controls.maxDistance / controls.minDistance),
+          0, 1,
+        );
+        document.querySelector('#zoomRange').value = String(Math.round(fraction * 100));
+        document.querySelector('#zoomValue').textContent = `${Math.round(distanceToPercent(distance))}%`;
+      }
+      function distanceToPercent(distance) {
+        return THREE.MathUtils.clamp((initialDistance / distance) * 100, 10, 300);
+      }
+      function applyZoomSlider(value) {
+        const amount = Number(value) / 100;
+        const distance = controls.maxDistance * Math.pow(controls.minDistance / controls.maxDistance, amount);
+        const direction = camera.position.clone().sub(controls.target).normalize();
+        camera.position.copy(controls.target).addScaledVector(direction, distance);
+        controls.update();
+        document.querySelector('#zoomValue').textContent = `${Math.round(distanceToPercent(distance))}%`;
+      }
+
+      function makeCameraPath(cameras, center) {
+        cameraPositions = cameras.map((entry) => {
+          const matrix = new THREE.Matrix4().set(...entry.camera_to_world.flat());
+          return new THREE.Vector3().setFromMatrixPosition(matrix).sub(center);
+        });
+        if (cameraPositions.length > 1) {
+          const pathGeometry = new THREE.BufferGeometry().setFromPoints(cameraPositions);
+          const pathLine = new THREE.Line(pathGeometry, new THREE.LineBasicMaterial({ color: 0x81b8ff, transparent: true, opacity: 0.72 }));
+          pathGroup.add(pathLine);
+        }
+        const markerGeometry = new THREE.SphereGeometry(sceneExtent * 0.009, 10, 8);
+        const markerMaterial = new THREE.MeshBasicMaterial({ color: 0x9bc8ff });
+        cameraMarkers = cameraPositions.map((position, index) => {
+          const marker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: markerMaterial.color }));
+          marker.position.copy(position);
+          marker.scale.setScalar(index === 0 ? 1.55 : 1);
+          pathGroup.add(marker);
+          return marker;
+        });
+      }
+
+      function updateFrame(index) {
+        document.querySelector('#frameReadout').textContent = `${String(index + 1).padStart(2, '0')} / ${String(cameraPositions.length).padStart(2, '0')}`;
+        document.querySelector('#frameName').textContent = `Frame ${String(index + 1).padStart(2, '0')}`;
+        cameraMarkers.forEach((marker, i) => {
+          marker.material.color.setHex(i === index ? 0xb7f36b : 0x81b8ff);
+        });
+      }
+
+      function fitView() {
+        controls.target.set(0, 0, 0);
+        camera.position.set(sceneExtent * 0.92, sceneExtent * 0.62, sceneExtent * 1.65);
+        camera.lookAt(controls.target);
+        controls.update();
+        initialDistance = camera.position.distanceTo(controls.target);
+        controls.minDistance = Math.max(sceneExtent * 0.12, 0.08);
+        controls.maxDistance = Math.max(sceneExtent * 5.5, 3);
+        controls.saveState();
+        setZoomSliderFromCamera();
+      }
+
+      async function start() {
+        const manifestResponse = await fetch(`${assetBase}scene.json`);
+        if (!manifestResponse.ok) throw new Error(`Could not load scene manifest (${manifestResponse.status}).`);
+        const manifest = await manifestResponse.json();
+        loadMessage.textContent = 'Loading 500,000 colored points…';
+        const [geometry, cameras] = await Promise.all([
+          new PLYLoader().loadAsync(`${assetBase}cloud.ply`, (event) => {
+            if (event.total) loadMessage.textContent = `Loading point cloud · ${Math.round((event.loaded / event.total) * 100)}%`;
+          }),
+          fetch(`${assetBase}cameras.json`).then((response) => {
+            if (!response.ok) throw new Error(`Could not load camera estimates (${response.status}).`);
+            return response.json();
+          }),
+        ]);
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        const center = geometry.boundingBox.getCenter(new THREE.Vector3());
+        geometry.translate(-center.x, -center.y, -center.z);
+        sceneExtent = Math.max(geometry.boundingSphere.radius * 2, 0.25);
+        const cloud = new THREE.Points(
+          geometry,
+          new THREE.PointsMaterial({
+            size: Math.max(sceneExtent * 0.0019, 0.0012),
+            sizeAttenuation: true,
+            vertexColors: Boolean(geometry.getAttribute('color')),
+            transparent: true,
+            opacity: 0.94,
+            depthWrite: true,
+          }),
+        );
+        scene.add(cloud);
+        makeCameraPath(cameras, center);
+        document.querySelector('#pointCount').textContent = Number(manifest.metrics.point_count).toLocaleString();
+        document.querySelector('#cameraCount').textContent = String(cameras.length);
+        document.querySelector('#runtime').innerHTML = `${Number(manifest.metrics.duration_seconds).toFixed(1)}<span class="stat-unit">sec</span>`;
+        document.querySelector('#vram').innerHTML = `${(Number(manifest.metrics.peak_vram_mb) / 1024).toFixed(1)}<span class="stat-unit">GB</span>`;
+        document.querySelector('#frameRange').max = String(Math.max(0, cameras.length - 1));
+        document.querySelector('#frameRange').value = '0';
+        updateFrame(0);
+        fitView();
+        status.textContent = 'Scene ready';
+        loading.classList.add('hidden');
+      }
+
+      document.querySelector('#orbitButton').addEventListener('click', (event) => {
+        controls.autoRotate = !controls.autoRotate;
+        event.currentTarget.classList.toggle('active', controls.autoRotate);
+        event.currentTarget.setAttribute('aria-pressed', String(controls.autoRotate));
+        event.currentTarget.lastChild.textContent = controls.autoRotate ? ' Auto orbit' : ' Orbit paused';
+      });
+      document.querySelector('#resetButton').addEventListener('click', () => fitView());
+      document.querySelector('#pathSwitch').addEventListener('click', (event) => {
+        pathGroup.visible = !pathGroup.visible;
+        event.currentTarget.setAttribute('aria-checked', String(pathGroup.visible));
+      });
+      document.querySelector('#frameRange').addEventListener('input', (event) => updateFrame(Number(event.currentTarget.value)));
+      document.querySelector('#zoomRange').addEventListener('input', (event) => applyZoomSlider(event.currentTarget.value));
+      document.querySelector('#zoomIn').addEventListener('click', () => {
+        const input = document.querySelector('#zoomRange'); input.value = String(Math.min(100, Number(input.value) + 8)); applyZoomSlider(input.value);
+      });
+      document.querySelector('#zoomOut').addEventListener('click', () => {
+        const input = document.querySelector('#zoomRange'); input.value = String(Math.max(0, Number(input.value) - 8)); applyZoomSlider(input.value);
+      });
+      controls.addEventListener('change', setZoomSliderFromCamera);
+
+      const resizeObserver = new ResizeObserver(() => {
+        const width = Math.max(stage.clientWidth, 1);
+        const height = Math.max(stage.clientHeight, 1);
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      });
+      resizeObserver.observe(stage);
+      renderer.setAnimationLoop(() => {
+        controls.update();
+        renderer.render(scene, camera);
+      });
+
+      start().catch((error) => {
+        console.error(error);
+        status.textContent = 'Could not load scene';
+        loadMessage.textContent = `${error.message} Run a local HTTP server from the project root, then reopen this page.`;
+        loadMessage.classList.add('error');
+        document.querySelector('.progress').style.display = 'none';
+      });
+    </script>
+  </body>
+</html>

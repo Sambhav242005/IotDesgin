@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "IoTDesign",
+    "slug": "iotdesign",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "com.iotdesign.rooms",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "IoTDesign finds and connects to your room reconstruction server on the same Wi-Fi network.",
+        "NSBonjourServices": ["_iotdesign._tcp"]
+      }
+    },
+    "android": {
+      "package": "com.iotdesign.rooms",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      ["expo-camera", { "cameraPermission": "IoTDesign uses the camera to capture overlapping room images." }]
+    ]
+  }
+}
