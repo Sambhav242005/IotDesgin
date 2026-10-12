@@ -32,6 +32,9 @@ def pack_frame(image, annotations, frame_index, max_masks=64, min_area_fraction=
                         'label': ann.get('label'), 'label_score': ann.get('label_score'),
                         'label_model': ann.get('label_model'),
                         'label_prompt': ann.get('label_prompt'),
+                        'sam_prompt': {key: ann.get(key) for key in ('prompt_strategy', 'point_coords',
+                                      'point_labels', 'prompt_points_are_heuristic', 'selection_score',
+                                      'candidate_count')},
                         'label_status': 'proposed' if ann.get('label') else 'unknown',
                         'moving': None, 'reflective': None,
                         'area_pixels': area, 'bbox_xywh': [float(v) for v in ann['bbox']],
@@ -63,7 +66,7 @@ def render_preview(image, objects, packed):
 
 def segment_frames(paths, output, model_id=DEFAULT_MODEL, max_edge=1024, points_per_side=16,
                    max_masks=64, stage=lambda value: None, semantic=False,
-                   detector_path=Path('data/models/yolov8n-oiv7.pt')):
+                   detector_path=Path('data/models/yolov8n-oiv7.pt'), mirror_refinement=True):
     """Run one frame at a time and write a reloadable, nonsemantic segmentation bundle."""
     if not paths:
         raise ValueError('Segmentation requires at least one image')
@@ -114,14 +117,15 @@ def segment_frames(paths, output, model_id=DEFAULT_MODEL, max_edge=1024, points_
                     if detections[index]:
                         generator.set_image(rgb)
                     for detection in detections[index]:
+                        from .prompts import predict_region
                         box = np.array(detection['box'])
-                        masks, scores, _ = generator.predict(box=box, multimask_output=False)
-                        mask = np.asarray(masks[0], dtype=bool)
-                        if float(scores[0]) < 0.5 or not mask.any():
+                        proposal = predict_region(generator, detection, rgb.shape, mirror_refinement)
+                        if proposal is None:
                             continue
-                        annotations.append({**detection, 'segmentation': mask, 'area': int(mask.sum()),
+                        mask = proposal['segmentation']
+                        annotations.append({**detection, **proposal, 'area': int(mask.sum()),
                                             'bbox': [box[0], box[1], box[2] - box[0], box[3] - box[1]],
-                                            'predicted_iou': float(scores[0]), 'stability_score': None})
+                                            'stability_score': None})
                 else:
                     annotations = generator.generate(rgb)
             objects, packed = pack_frame(rgb, annotations, index, max_masks=max_masks,
@@ -142,6 +146,8 @@ def segment_frames(paths, output, model_id=DEFAULT_MODEL, max_edge=1024, points_
         torch.cuda.synchronize()
         metrics = {'model': model_id, 'frames': len(frames),
                    'semantic_labels': semantic,
+                   'mirror_prompt_mode': ('surface_hypotheses' if mirror_refinement else 'box_only')
+                   if semantic else 'not_applicable',
                    'regions': sum(len(f['objects']) for f in frames),
                    'duration_seconds': time.perf_counter() - started,
                    'peak_vram_mb': torch.cuda.max_memory_allocated() / 1024**2}

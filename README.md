@@ -6,6 +6,8 @@ IoTDesign captures overlapping room photos on an Android phone, uploads them to 
 
 GPU profiles include a local CPU Grounding DINO `mirror.` pass before SAM 2. Its masks are review proposals; it can miss mirrors or segment reflected contents incorrectly. See [targeted mirror validation](docs/research/grounded-mirror-validation.md).
 
+Mirror segmentation compares box-only, positive/negative point prompts, and one previous-mask refinement. Automatically chosen points are proposals; they do not establish the true mirror boundary. The three-sample check improved average overlap but also showed a regression, so review remains necessary.
+
 Windows x64: double-click **`Start-IoTDesign.cmd`**. It installs a managed Python environment, dependencies and pinned official model sources, downloads selected checkpoints, detects usable GPU/system memory, and starts the HTTPS server and one GPU worker in the background. Internet and several GB of disk space are required for first setup. An NVIDIA driver must already be installed; the script does not install drivers or reboot Windows.
 
 | Automatic profile | Inputs | VGGT storage | Segmentation | Export cap |

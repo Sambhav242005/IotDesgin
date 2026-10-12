@@ -66,6 +66,8 @@ Official Meta SAM 2.1 Hiera Small can separate image regions using automatic mas
 
 ## Windows setup and hardware adjustment
 
+For semantic mirror masks, compare the box baseline against bounded positive/negative point hypotheses and one logits-based refinement. Preserve chosen prompt provenance and distinguish heuristic points from confirmed annotations. Non-mirror prompting remains box-only. Keep exclusions manual and retain unknown material/motion states; mask ranking is not proof of mirror accuracy.
+
 Semantic scans also run Grounding DINO Tiny with the prompt `mirror.` on CPU before SAM 2. Preserve prompt/model provenance and keep exclusions explicit. Targeted detection improved candidate recall on three Mirror3D samples, but mask accuracy remains insufficient for automatic filtering. Review does not establish completeness.
 
 `Start-IoTDesign.cmd` invokes a Windows x64 installer/launcher. It bootstraps uv and Python 3.12 when missing, installs dependencies and pinned source archives, checks real CUDA execution and free memory, caches selected checkpoints, and starts background services. Preserve data, credentials, certificates and original images. Reject unrelated port owners; stop only verified launcher-owned processes. Private-network firewall setup is an explicit elevated option.

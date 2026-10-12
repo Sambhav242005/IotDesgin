@@ -5,20 +5,25 @@ from pathlib import Path
 
 import numpy as np
 from iotdesign.segmentation import segment_frames
+from iotdesign.worker import worker_lock
 from PIL import Image
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sam-size', choices=('tiny', 'small'), default='tiny')
+    parser.add_argument('--box-only', action='store_true')
     args = parser.parse_args()
     root = Path('data/benchmark/mirror3d-samples')
     paths = sorted((root / 'images').glob('*.jpg'))
     if len(paths) != 3:
         raise RuntimeError('Download the three Mirror3D example images and masks before this check')
-    output = root / f'grounded-semantic-{args.sam_size}'
-    metrics = segment_frames(paths, output, semantic=True, model_id=f'facebook/sam2.1-hiera-{args.sam_size}',
-                             max_edge=768, stage=lambda value: print(value, flush=True))
+    suffix = f'{args.sam_size}-' + ('box-only' if args.box_only else 'refined')
+    output = root / f'grounded-semantic-{suffix}'
+    with worker_lock(Path('data')):
+        metrics = segment_frames(paths, output, semantic=True, model_id=f'facebook/sam2.1-hiera-{args.sam_size}',
+                                 max_edge=768, mirror_refinement=not args.box_only,
+                                 stage=lambda value: print(value, flush=True))
     manifest = json.loads((output / 'objects.json').read_text())
     samples = []
     with np.load(output / 'objects.npz') as masks:
@@ -38,7 +43,7 @@ def main():
                             'mirror_mask_iou': float(intersection / union) if union else 0,
                             'labels_are_proposals': True})
     result = {'metrics': metrics, 'samples': samples, 'dataset_scope': 'three Mirror3D example images'}
-    (root / f'grounded-results-{args.sam_size}.json').write_text(json.dumps(result, indent=2))
+    (root / f'grounded-results-{suffix}.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
 
 

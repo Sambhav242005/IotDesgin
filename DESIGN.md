@@ -65,6 +65,8 @@ The mobile flow progresses through discovery/manual connection, pairing, connect
 
 ## Validation limits and future work
 
+Mirror prompts retain a box-only fallback and compare it with three point-prompt candidates plus one logits-based refinement. Nine interior positive points and valid exterior negative points are generated in resized-image coordinates. A bounded quality/coverage/leakage ranking chooses one proposal; metadata records the strategy and heuristic points. This improves one observed reflected-content failure but can regress elsewhere. Non-mirror detections and the generic automatic-mask generator retain their previous paths.
+
 The semantic path now adds CPU Grounding DINO Tiny prompted with `mirror.` between YOLO and SAM 2. Grounded boxes use the same resized-image coordinates as SAM prompts; same-category duplicates are suppressed. CUDA custom kernels are disabled for this Windows path. Scores are category proposals, not reflective-material certainty. The [grounded-mirror report](docs/research/grounded-mirror-validation.md) records poor mask accuracy despite improved candidate recall. There is no VLM scene-description pass.
 
 For semantic masks, mirrors/glass, moving objects, and measured IoT placement, consult the [three-agent research synthesis](docs/research/README.md). Semantic proposals, image masks, provenance and explicit review are implemented. Motion/material inference, persistent tracks and measured placement remain research stages.

@@ -34,3 +34,6 @@ Scope: native capture, discovery and remembered pairing; durable API and GPU wor
 
 - [x] G11: Grounding DINO mirror proposals feed SAM 2 with proposal provenance
   EVIDENCE: 25 tests pass. Real Windows CPU DINO inference and SAM 2 Tiny/Small ran on three Mirror3D images, proposing mirrors on all three. Tiny mask IoUs 0.3500/0.0012/0.2112 remain poor, and Small did not resolve the boundary failures; reliable mirror handling is an open gate. See grounded-mirror report.
+
+- [x] G12: Bounded mirror point prompts and mask refinement run with fallback and provenance
+  EVIDENCE: 29 tests pass. Three-sample mean IoU improved Tiny 0.1875→0.3915 and Small 0.1871→0.3641. Sample 45 regressed; no broad accuracy guarantee is established. CUDA peaks remained 525.21/551.79 MiB. See grounded-mirror report for individual results and heuristic limitations.

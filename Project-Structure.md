@@ -63,6 +63,8 @@ Runtime data, vendored models, dependency directories, and generated native proj
 
 ## Change routing
 
+`server/iotdesign/prompts.py` builds bounded mirror point prompts, compares candidates and refines from low-resolution logits. `tests/test_prompts.py` checks image-edge behavior, ranking, fallback and refinement inputs.
+
 The semantic recognition stage also uses CPU Grounding DINO Tiny for targeted mirror proposals. `scripts/validate-mirror-grounding.py` compares resulting masks against three local Mirror3D example ground-truth masks; `docs/research/grounded-mirror-validation.md` records the limitations.
 
 | Change | Primary files |
