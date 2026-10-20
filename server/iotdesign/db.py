@@ -29,6 +29,7 @@ class Database:
                     path TEXT NOT NULL, PRIMARY KEY(scan_id,id),
                     FOREIGN KEY(scan_id) REFERENCES scans(id)
                 );
+                CREATE INDEX IF NOT EXISTS ordered_scan_frames ON frames(scan_id,timestamp,id);
                 CREATE TABLE IF NOT EXISTS jobs (
                     id TEXT PRIMARY KEY, scan_id TEXT NOT NULL, state TEXT NOT NULL,
                     stage TEXT NOT NULL, frame_count INTEGER NOT NULL,
@@ -42,6 +43,16 @@ class Database:
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS active_job_per_scan ON jobs(scan_id)
                     WHERE state IN ('queued','running');
+                CREATE TABLE IF NOT EXISTS stream_sessions (
+                    scan_id TEXT PRIMARY KEY REFERENCES scans(id),
+                    last_queued_count INTEGER NOT NULL DEFAULT 0,
+                    stopped INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS job_inputs (
+                    job_id TEXT NOT NULL REFERENCES jobs(id),
+                    frame_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+                    PRIMARY KEY(job_id, frame_id)
+                );
             """)
 
     @contextmanager

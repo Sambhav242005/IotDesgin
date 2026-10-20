@@ -1,5 +1,9 @@
 # Repository instructions
 
+## Start here on every fresh session
+
+Read [REMINDERS.md](REMINDERS.md) first, before planning or changing this project. Review its priority tasks and unfinished validation, then continue the highest-priority work consistent with the user's current request. Verify live state rather than assuming previously running services or installed builds are unchanged. Update that file after meaningful progress or before handing off, keeping completed work, pending tasks and unverified claims separate. The user's latest instructions take precedence over this handoff.
+
 IoTDesign captures room images in a native mobile app, sends them to a local PC, and reconstructs an unscaled colored point cloud with official VGGT.
 
 ## Read the relevant document

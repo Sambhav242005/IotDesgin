@@ -24,7 +24,7 @@ def main():
     worker.add_argument('--semantic-objects', action='store_true', help='YOLO names and SAM 2 masks')
     worker.add_argument('--max-frames', type=int, choices=(8, 12, 20), default=20)
     worker.add_argument('--weight-precision', choices=('fp32', 'fp16'), default='fp32')
-    worker.add_argument('--max-points', type=int, default=500000)
+    worker.add_argument('--max-points', type=int, default=0, help='Optional export cap; 0 keeps all valid points')
     worker.add_argument('--sam-model', default='facebook/sam2.1-hiera-small')
     worker.add_argument('--segmentation-edge', type=int, default=1024)
     worker.add_argument('--vram-budget-gb', type=float, default=0)
@@ -41,6 +41,10 @@ def main():
     benchmark.add_argument('--repo', type=Path, default=Path('vendor/vggt'))
     benchmark.add_argument('--resolution', type=int, default=336)
     benchmark.add_argument('--output', type=Path, default=Path('data/benchmark'))
+    colmap = commands.add_parser('colmap-check', help='Optional image-only COLMAP / phone-pose consistency check')
+    colmap.add_argument('--scan', required=True)
+    colmap.add_argument('--max-frames', type=int, default=None,
+                        help='Explicit evenly sampled diagnostic subset (at least 3); originals stay preserved')
     commands.add_parser('doctor')
     export = commands.add_parser('openapi')
     export.add_argument('--output', type=Path, default=Path('docs/openapi.json'))
@@ -103,6 +107,15 @@ def main():
                 (args.output / 'results.json').write_text(json.dumps(results, indent=2))
         print(json.dumps(results, indent=2))
         if any(r['state'] == 'failed' for r in results):
+            raise SystemExit(1)
+    elif args.command == 'colmap-check':
+        from .colmap_validation import run_colmap_check
+        try:
+            report = run_colmap_check(settings, args.scan, args.max_frames)
+        except (RuntimeError, ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(report, indent=2))
+        if report['status'] == 'failed':
             raise SystemExit(1)
     elif args.command == 'doctor':
         import importlib.util

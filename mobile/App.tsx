@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, AppState, Image, KeyboardAvoidingView, Platform, Pressable,
-  SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View,
+  SafeAreaView, ScrollView, StatusBar as NativeStatusBar, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -10,14 +10,18 @@ import * as SecureStore from 'expo-secure-store';
 import NetInfo from '@react-native-community/netinfo';
 import { StatusBar } from 'expo-status-bar';
 import {
-  onDiscoveryError, onServiceFound, request, startDiscovery, stopDiscovery,
+  capturePreview, chooseFloor, stopVideo, onDiscoveryError, onServiceFound, request, startDiscovery, stopDiscovery,
   type DiscoveredServer,
 } from './modules/iotdesign-network/src';
 import { isSupportedApiVersion, normalizeAddress, parsePairing, prioritizeDiscoveredServer } from './src/protocol';
+import { processCameraFrame } from './src/stream';
+import { VideoCamera } from './modules/iotdesign-network/src/VideoCamera';
 
 type Server = { id: string; name: string; address: string; fingerprint: string };
 type Frame = { id: string; uri: string; timestamp: string; width: number; height: number; scanId: string };
-type SavedState = { server: Server | null; token: string | null; clientName: string; scanId: string | null; pending: Frame[] };
+type SavedState = { server: Server | null; token: string | null; clientName: string; scanId: string | null; pending: Frame[]; captureMode?: 'photos' | 'stream' };
+type RoomSummary = { id: string; name: string; state: string };
+
 type ApiResult<T> = { value: T; peerFingerprint: string };
 
 const STORE_KEY = 'iotdesign.saved.v1';
@@ -56,7 +60,7 @@ export default function App() {
   const savedRef = useRef(saved);
   const [screen, setScreen] = useState<'loading' | 'connect' | 'pair' | 'home' | 'capture' | 'qr'>('loading');
   const screenRef = useRef(screen);
-  screenRef.current = screen;
+  useEffect(() => { screenRef.current = screen; }, [screen]);
   const [connection, setConnection] = useState('Starting…');
   const [message, setMessage] = useState('');
   const [addressInput, setAddressInput] = useState('');
@@ -67,12 +71,16 @@ export default function App() {
   const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [scanName, setScanName] = useState('Room scan');
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [frames, setFrames] = useState<Frame[]>([]);
   const [uploaded, setUploaded] = useState(0);
   const [reconstructing, setReconstructing] = useState(false);
-  const [pictureSize, setPictureSize] = useState<string | undefined>();
+  const [foreground, setForeground] = useState(AppState.currentState === 'active');
+  const [liveStatus, setLiveStatus] = useState('Connecting live preview…');
+  const liveLock = useRef(false);
+  const finishing = useRef(false);
   const [cameraError, setCameraError] = useState('');
   const camera = useRef<CameraView>(null);
   const captureLock = useRef(false);
@@ -81,12 +89,15 @@ export default function App() {
   const qrScanLock = useRef(false);
   const discoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureNumber = useRef(0);
+  const saveTail = useRef<Promise<void>>(Promise.resolve());
   const multiCandidates = useRef<Record<string, DiscoveredServer>>({});
 
   const updateSaved = useCallback(async (value: SavedState) => {
     savedRef.current = value;
     setSaved(value);
-    await saveSaved(value);
+    const pending = saveTail.current.catch(() => undefined).then(() => saveSaved(value));
+    saveTail.current = pending;
+    await pending;
   }, []);
 
   const call = useCallback(async <T,>(
@@ -131,9 +142,12 @@ export default function App() {
       const server = await checkServer(state.server, state.token);
       if (state.token) {
         await call('GET', '/api/scans', { server, token: state.token });
-        await updateSaved({ ...state, server });
+        // Discovery can complete after capture starts or an upload is acknowledged.
+        // Never replace the current scan/queue with the reconnect call's old snapshot.
+        if (savedRef.current.token !== state.token) return false;
+        await updateSaved({ ...savedRef.current, server });
         setConnection(`Connected · ${server.name}`);
-        setScreen('home');
+        setScreen(current => current === 'capture' ? current : 'home');
         setMessage('');
         void pendingFlush.current?.();
         return true;
@@ -227,6 +241,7 @@ export default function App() {
       if (state.isConnected && savedRef.current.server) { void reconnect(); beginDiscovery(); }
     });
     const appState = AppState.addEventListener('change', state => {
+      setForeground(state === 'active');
       if (state === 'active' && savedRef.current.server) { void reconnect(); beginDiscovery(); }
     });
     return () => {
@@ -287,8 +302,10 @@ export default function App() {
     finally { qrScanLock.current = false; }
   }, [checkServer, pair]);
 
-  const flushQueue = useCallback(async () => {
-    if (flushLock.current || !savedRef.current.server || !savedRef.current.token) return;
+  const flushQueue = useCallback(async (wait = false) => {
+    if (flushLock.current && !wait) return;
+    while (flushLock.current) await new Promise(resolve => setTimeout(resolve, 25));
+    if (!savedRef.current.server || !savedRef.current.token) return;
     flushLock.current = true;
     try {
       while (savedRef.current.pending.length) {
@@ -298,19 +315,22 @@ export default function App() {
           fields: { timestamp: frame.timestamp, width: String(frame.width), height: String(frame.height) },
         });
         const next = { ...savedRef.current, pending: savedRef.current.pending.slice(1) };
-        await updateSaved(next); setFrames(next.pending); setUploaded(value => value + 1);
+        await updateSaved(next); setFrames(next.pending.filter(item => item.scanId === next.scanId));
+        if (frame.scanId === next.scanId) setUploaded(value => value + 1);
         await FileSystem.deleteAsync(frame.uri, { idempotent: true }).catch(() => undefined);
       }
     } catch (error) {
       setConnection('Disconnected · keeping captured frames on this phone'); setMessage(errorText(error));
     } finally { flushLock.current = false; }
   }, [call, updateSaved]);
-  pendingFlush.current = flushQueue;
+  useEffect(() => { pendingFlush.current = flushQueue; }, [flushQueue]);
 
   const captureOne = useCallback(async () => {
+    if (finishing.current) return;
+    if (savedRef.current.captureMode === 'stream') return;
     if (captureLock.current || !cameraReady || !camera.current || !savedRef.current.scanId) return;
     if (captureNumber.current >= 30) {
-      setCapturing(false); setMessage('This scan reached the 30 frame limit. Finish it to reconstruct.'); return;
+      setMessage('30 reconstruction photos saved. Live preview continues; finish the scan when ready.'); return;
     }
     captureLock.current = true;
     try {
@@ -330,50 +350,140 @@ export default function App() {
         scanId: savedRef.current.scanId,
       };
       const next = { ...savedRef.current, pending: [...savedRef.current.pending, frame] };
-      await updateSaved(next); setFrames(next.pending); void flushQueue();
+      await updateSaved(next); setFrames(next.pending.filter(item => item.scanId === next.scanId)); void flushQueue();
     } catch (error) { setMessage(`Capture failed: ${errorText(error)}`); }
     finally { captureLock.current = false; }
   }, [cameraReady, flushQueue, updateSaved]);
 
   useEffect(() => {
-    if (!capturing) return;
+    if (saved.captureMode === 'stream' || !capturing || screen !== 'capture' || !foreground) return;
     const timer = setInterval(() => { void captureOne(); }, 2000);
     return () => clearInterval(timer);
-  }, [captureOne, capturing]);
+  }, [captureOne, capturing, screen, foreground, saved.captureMode]);
+
+  useEffect(() => {
+    if (saved.captureMode === 'stream' || Platform.OS !== 'android' || screen !== 'capture' || !cameraReady || !capturing || !foreground) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const stream = async () => {
+      const scanId = savedRef.current.scanId;
+      if (cancelled || finishing.current || !scanId) return;
+      if (!liveLock.current && !captureLock.current) {
+        liveLock.current = true;
+        try {
+          await processCameraFrame({
+            capture: capturePreview,
+            active: () => !cancelled && !finishing.current,
+            persist: async () => undefined,
+            publish: async picture => {
+              await call('PUT', `/api/scans/${scanId}/live`, { filePath: picture.uri });
+              if (!cancelled) setLiveStatus(savedRef.current.captureMode === 'stream'
+                ? 'Streaming → live 3D on PC' : 'Live camera → PC');
+            },
+            removeTemporary: uri => FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined),
+          });
+        } catch (error) {
+          if (!cancelled) setLiveStatus(`Live preview: ${errorText(error)}`);
+        } finally {
+          liveLock.current = false;
+        }
+      }
+      if (!cancelled) timer = setTimeout(() => { void stream(); }, 200);
+    };
+    void stream();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [call, cameraReady, capturing, foreground, screen, saved.captureMode]);
+
+  useEffect(() => {
+    if (saved.captureMode !== 'stream' || screen !== 'capture' || !foreground) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const result = await call<{ frames: Frame[]; frame_count?: number }>('GET', `/api/scans/${saved.scanId}?include_frames=false`);
+        if (!cancelled) setUploaded(result.value.frame_count ?? result.value.frames.length);
+      } catch { /* The video status reports connection failures. */ }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 2000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [call, foreground, saved.captureMode, saved.scanId, screen]);
+
+  useEffect(() => {
+    if (screen !== 'home' || !foreground || !saved.token) return;
+    let cancelled = false;
+    void call<RoomSummary[]>('GET', '/api/scans?include_frames=false').then(result => {
+      if (!cancelled) setRooms(result.value.filter(room => room.state === 'capturing'));
+    }).catch(error => { if (!cancelled) setMessage(errorText(error)); });
+    return () => { cancelled = true; };
+  }, [call, foreground, saved.token, screen]);
+
+  const resumeRoom = useCallback(async (scanId: string) => {
+    try {
+      const result = await call<{ frames: { id: string }[]; frame_count?: number; capture_mode: 'photos' | 'stream'; state: string }>('GET', `/api/scans/${scanId}?include_frames=false`);
+      if (result.value.state !== 'capturing') throw new Error('This room is already finished. Start a new room.');
+      await updateSaved({ ...savedRef.current, scanId, captureMode: result.value.capture_mode });
+      finishing.current = false;
+      const pending = savedRef.current.pending.filter(frame => frame.scanId === scanId);
+      setUploaded(result.value.frame_count ?? result.value.frames.length);
+      captureNumber.current = (result.value.frame_count ?? result.value.frames.length) + pending.length;
+      setFrames(pending); setCameraReady(false); setScreen('capture'); setCapturing(true);
+      if (savedRef.current.pending.length) void flushQueue();
+    } catch (error) { setMessage(errorText(error)); }
+  }, [call, flushQueue, updateSaved]);
+
+  const chooseNewRoom = useCallback(async () => {
+    setCapturing(false);
+    try { if (Platform.OS === 'android' && savedRef.current.captureMode === 'stream') await stopVideo(); }
+    catch (error) { setMessage(`Previous video stopped: ${errorText(error)}`); }
+    setScanName(''); setScreen('home');
+  }, []);
 
   const startScan = useCallback(async () => {
     try {
-      if (savedRef.current.scanId) throw new Error('A scan is still in progress. Resume it or finish it before starting another.');
       if (!permission?.granted) {
         const granted = await requestPermission();
         if (!granted.granted) throw new Error('Allow camera access in your phone settings to scan a room.');
       }
-      const response = await call<{ id: string }>('POST', '/api/scans', { body: { name: scanName.trim() || 'Room scan' } });
-      const next = { ...savedRef.current, scanId: response.value.id, pending: [] };
+      const response = await call<{ id: string; capture_mode?: 'photos' | 'stream' }>('POST', '/api/scans', { body: { name: scanName.trim() || 'Room scan', capture_mode: Platform.OS === 'android' ? 'stream' : 'photos' } });
+      if (Platform.OS === 'android' && response.value.capture_mode !== 'stream') {
+        throw new Error('Restart the updated PC server before starting live reconstruction.');
+      }
+      const next = { ...savedRef.current, scanId: response.value.id, pending: savedRef.current.pending, captureMode: Platform.OS === 'android' ? 'stream' as const : 'photos' as const };
       await updateSaved(next); setFrames([]); setUploaded(0); captureNumber.current = 0;
+      finishing.current = false;
       setCameraReady(false); setCameraError(''); setScreen('capture'); setCapturing(true);
       setMessage('Move slowly around the room. Keep each view overlapping the last.');
+      if (next.pending.length) void flushQueue();
     } catch (error) { setMessage(errorText(error)); }
-  }, [call, permission?.granted, requestPermission, scanName, updateSaved]);
+  }, [call, flushQueue, permission, requestPermission, scanName, updateSaved]);
 
   const finishScan = useCallback(async () => {
+    if (finishing.current) return;
+    finishing.current = true;
     setCapturing(false);
-    await flushQueue();
+    try { if (Platform.OS === 'android' && savedRef.current.captureMode === 'stream') await stopVideo(); }
+    catch (error) { finishing.current = false; setMessage(errorText(error)); return; }
+    while (liveLock.current || captureLock.current) await new Promise(resolve => setTimeout(resolve, 25));
+    await flushQueue(true);
     const current = savedRef.current;
     if (current.pending.some(frame => frame.scanId === current.scanId)) {
-      setMessage('Waiting for the remaining photos to upload. Keep the app open and try Finish again.'); return;
+      finishing.current = false; setMessage('Waiting for the remaining frames to upload. Keep the app open and try Finish again.'); return;
     }
     try {
-      const scan = await call<{ frames: Frame[] }>('GET', `/api/scans/${current.scanId}`);
-      const count = scan.value.frames.length;
-      if (count < 8) { setMessage(`This scan has ${count} uploaded photos. Capture at least 8 before reconstructing.`); return; }
+      const scan = await call<{ frames: Frame[]; frame_count?: number }>('GET', `/api/scans/${current.scanId}?include_frames=false`);
+      const count = scan.value.frame_count ?? scan.value.frames.length;
+      if (count < 8) { setMessage(`This scan has ${count} uploaded photos. Capture at least 8 before reconstructing.`); finishing.current = false; return; }
       const frameCount = count >= 20 ? 20 : count >= 12 ? 12 : 8;
       setReconstructing(true);
-      await call('POST', `/api/scans/${current.scanId}/reconstruct`, { body: { frame_count: frameCount } });
-      setMessage(`Reconstruction queued with ${frameCount} images. Check progress on the PC capture station.`);
+      if (current.captureMode === 'stream') {
+        await call('POST', `/api/scans/${current.scanId}/stream/finish`);
+      } else {
+        await call('POST', `/api/scans/${current.scanId}/reconstruct`, { body: { frame_count: frameCount } });
+      }
+      setMessage(current.captureMode === 'stream' ? 'Video saved. The PC will process all captured video frames; check its backlog and playback on the capture station.' : `Reconstruction queued with ${frameCount} images. Check progress on the PC capture station.`);
       await updateSaved({ ...current, scanId: null }); setScreen('home');
     } catch (error) { setMessage(errorText(error)); }
-    finally { setReconstructing(false); }
+    finally { finishing.current = false; setReconstructing(false); }
   }, [call, flushQueue, updateSaved]);
 
   const forgetServer = useCallback(async () => {
@@ -382,17 +492,9 @@ export default function App() {
     setConnection('Looking for an IoTDesign PC…'); setMessage(''); beginDiscovery();
   }, [beginDiscovery, updateSaved]);
 
-  const onCameraReady = useCallback(async () => {
-    setCameraReady(true);
-    try {
-      const sizes = await camera.current?.getAvailablePictureSizesAsync();
-      const preferred = sizes?.find(size => {
-        const match = /^(\d+)x(\d+)$/.exec(size);
-        return match && Number(match[1]) <= 1600 && Number(match[1]) >= 1280 && Number(match[2]) >= 720;
-      });
-      if (preferred) setPictureSize(preferred);
-    } catch { /* use the camera's supported default */ }
-  }, []);
+  // Do not reconfigure pictureSize after announcing readiness: that tears down
+  // the CameraX session just as the first timed capture starts on some phones.
+  const onCameraReady = useCallback(() => setCameraReady(true), []);
 
   const selectCandidate = (server: Server) => {
     setCandidate(server); setAddressInput(server.address); setVerified(null); setFingerprintConfirmed(false);
@@ -401,7 +503,7 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, styles.androidInsets]}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.safe} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.header}>
@@ -471,40 +573,51 @@ export default function App() {
           <View style={styles.card}><Text style={styles.muted}>SAVED PC</Text><Text style={styles.cardTitle}>{saved.server?.name ?? 'IoTDesign PC'}</Text><Text style={styles.muted}>{saved.server?.address}</Text><Text style={styles.connected}>{connection}</Text></View>
           <Text style={styles.label}>ROOM NAME</Text>
           <TextInput style={styles.input} value={scanName} onChangeText={setScanName} placeholder="Room scan" placeholderTextColor="#718082" />
-          <Pressable style={styles.primaryButton} onPress={() => void startScan()}><Text style={styles.primaryText}>Start room scan</Text></Pressable>
+          <Pressable style={styles.primaryButton} onPress={() => void startScan()}><Text style={styles.primaryText}>Start new room</Text></Pressable>
           {saved.pending.length ? <View style={styles.card}><Text style={styles.cardTitle}>{saved.pending.length} saved photos waiting to upload</Text><Pressable style={styles.secondaryButton} onPress={() => void flushQueue()}><Text style={styles.secondaryText}>Retry upload</Text></Pressable></View> : null}
-          {saved.scanId ? <View style={styles.card}>
-            <Text style={styles.cardTitle}>An unfinished scan is saved</Text>
-            <Text style={styles.muted}>Resume to keep capturing or finish uploading its saved photos.</Text>
-            <Pressable style={styles.secondaryButton} onPress={() => {
-              void call<{ frames: Frame[] }>('GET', `/api/scans/${saved.scanId}`).then(async result => {
-                setUploaded(result.value.frames.length);
-                captureNumber.current = Math.min(result.value.frames.length + saved.pending.length, 30);
-                setFrames(saved.pending); setCameraReady(false); setScreen('capture'); setCapturing(true);
-                if (saved.pending.length) void flushQueue();
-              }).catch(error => setMessage(errorText(error)));
-            }}><Text style={styles.secondaryText}>Resume saved scan</Text></Pressable>
-          </View> : null}
+          {rooms.map(room => <View style={styles.card} key={room.id}>
+            <Text style={styles.cardTitle}>{room.name}</Text>
+            <Text style={styles.muted}>Saved unfinished room ? {room.id.slice(0, 8)}</Text>
+            <Pressable style={styles.secondaryButton} onPress={() => void resumeRoom(room.id)}>
+              <Text style={styles.secondaryText}>Resume this room</Text>
+            </Pressable>
+          </View>)}
           <Pressable style={styles.qrButton} onPress={() => void forgetServer()}><Text style={styles.secondaryText}>Change or forget PC</Text></Pressable>
           {message ? <Text style={styles.notice}>{message}</Text> : null}
         </ScrollView> : null}
 
         {screen === 'capture' ? <View style={styles.captureScreen}>
           <View style={styles.cameraFrame}>
-            <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={pictureSize} onCameraReady={() => void onCameraReady()} onMountError={event => setCameraError(event.message)} />
-            <View style={styles.cameraHud}><Text style={styles.cameraHudText}>{capturing ? 'CAPTURING · ONE FRAME / 2 SEC' : 'PAUSED'}</Text><Text style={styles.cameraHudText}>{uploaded} uploaded · {frames.length} waiting</Text></View>
+            {Platform.OS === 'android' && saved.captureMode === 'stream' ? <VideoCamera
+              style={StyleSheet.absoluteFill}
+              configuration={capturing && foreground && saved.server && saved.token && saved.scanId ? {
+                address: `${saved.server.address}/api/scans/${saved.scanId}/video`,
+                fingerprint: saved.server.fingerprint, token: saved.token,
+              } : null}
+              onVideoStatus={event => setLiveStatus(event.nativeEvent.detail)}
+            /> : <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" animateShutter={false}
+              onCameraReady={onCameraReady} onMountError={event => {
+                setCameraReady(false); setCameraError(event.message);
+              }} />}
+            <View style={styles.cameraHud}><Text style={styles.cameraHudText}>{capturing ? (saved.captureMode === 'stream' ? 'CONTINUOUS H.264 VIDEO' : 'PHOTO CAPTURE') : 'PAUSED'}</Text><Text style={styles.cameraHudText}>{saved.captureMode === 'stream' ? `Continuous video to PC` : `${uploaded} uploaded · ${frames.length} waiting`}</Text></View>
             <View pointerEvents="none" style={styles.guide}><View style={styles.guideCorner} /><View style={[styles.guideCorner, styles.topRight]} /><View style={[styles.guideCorner, styles.bottomLeft]} /><View style={[styles.guideCorner, styles.bottomRight]} /></View>
           </View>
           <View style={styles.captureControls}>
-            <Text style={styles.step}>ROOM SCAN · {Math.min(uploaded + frames.length, 30)}/30 FRAMES</Text>
+            <Text style={styles.connected}>{Platform.OS === 'android' ? (capturing ? liveStatus : 'Live preview paused') : 'PC live preview currently requires Android'}</Text>
+            {Platform.OS === 'android' && saved.captureMode === 'stream' ? <Pressable style={styles.secondaryButton} disabled={!capturing} onPress={() => {
+              try { chooseFloor(); setMessage('Tap the actual floor in the camera view. Move slowly until a grid appears.'); }
+              catch (error) { setMessage(error instanceof Error ? error.message : 'Start video first'); }
+            }}><Text style={styles.secondaryText}>Set floor on camera</Text></Pressable> : null}
+            <Text style={styles.step}>{saved.captureMode === 'stream' ? 'VIDEO STREAM | 30 FPS TARGET | LIVE 3D' : `ROOM SCAN | ${uploaded + frames.length}/30 FRAMES`}</Text>
             <Text style={styles.body}>Walk slowly. Overlap each view and keep the same objects visible as you turn.</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbs}>
+            {saved.captureMode !== 'stream' ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbs}>
               {frames.map(frame => <Image key={frame.id} source={{ uri: frame.uri }} style={styles.thumb} />)}
               {Array.from({ length: Math.min(uploaded, 8) }).map((_, index) => <View key={`uploaded-${index}`} style={[styles.thumb, styles.uploadedThumb]}><Text style={styles.uploadedCheck}>✓</Text></View>)}
-            </ScrollView>
+            </ScrollView> : null}
             <View style={styles.controlsRow}>
+              <Pressable style={styles.secondaryButton} onPress={() => void chooseNewRoom()} disabled={reconstructing}><Text style={styles.secondaryText}>New room</Text></Pressable>
               <Pressable style={styles.secondaryButton} onPress={() => setCapturing(value => !value)}><Text style={styles.secondaryText}>{capturing ? 'Pause' : 'Resume'}</Text></Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => void captureOne()}><Text style={styles.secondaryText}>Capture now</Text></Pressable>
+              {saved.captureMode !== 'stream' ? <Pressable style={styles.secondaryButton} onPress={() => void captureOne()}><Text style={styles.secondaryText}>Save frame now</Text></Pressable> : null}
               <Pressable style={[styles.primaryButton, styles.finishButton]} onPress={() => void finishScan()} disabled={reconstructing}><Text style={styles.primaryText}>{reconstructing ? 'Queuing…' : 'Finish scan'}</Text></Pressable>
             </View>
             {cameraError || message ? <Text style={styles.notice}>{cameraError || message}</Text> : null}
@@ -516,6 +629,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  androidInsets: Platform.OS === 'android' ? { paddingTop: NativeStatusBar.currentHeight ?? 24, paddingBottom: 24 } : {},
   safe: { flex: 1, backgroundColor: '#101b1d' },
   header: { height: 72, paddingHorizontal: 22, borderBottomWidth: 1, borderBottomColor: '#293638', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   eyebrow: { color: '#adbfbb', fontSize: 10, letterSpacing: 1.6, fontWeight: '700' },

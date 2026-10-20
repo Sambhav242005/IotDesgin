@@ -54,9 +54,9 @@ def select_profile(hardware, requested='Auto'):
             raise ValueError(f'{requested} exceeds the detected safe profile {name}; close GPU apps or use Auto')
         name = requested
     presets = {
-        'High': (336, 12, 'fp32', 500000, 'small', 1024),
-        'Balanced': (224, 8, 'fp16', 300000, 'small', 896),
-        'Low': (168, 8, 'fp16', 150000, 'tiny', 768),
+        'High': (336, 12, 'fp32', 0, 'small', 1024),
+        'Balanced': (224, 8, 'fp16', 0, 'small', 896),
+        'Low': (168, 8, 'fp16', 0, 'tiny', 768),
         'ServerOnly': (0, 0, 'none', 0, 'none', 0),
     }
     resolution, frames, precision, points, sam, edge = presets[name]

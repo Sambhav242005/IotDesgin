@@ -1,0 +1,104 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Phone video</title>
+<style>
+:root{color-scheme:dark;font:14px system-ui;background:#0a1112;color:#edf2ed}*{box-sizing:border-box}body{margin:0;padding:10px}button,select,input{font:inherit}button,select{padding:8px;background:#243735;color:#edf2ed;border:1px solid #60776e;border-radius:3px}button{cursor:pointer}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #d2ed94;outline-offset:2px}#viewport{position:relative;height:calc(100vh - 160px);min-height:200px;overflow:hidden;display:grid;place-items:center}video{position:absolute;object-fit:contain}nav{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}#seek{flex:1;min-width:100px;accent-color:#d2ed94}p{margin:8px 0;color:#b2c5bd;font-size:12px}select{max-width:100%}[hidden]{display:none!important}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js" defer></script></head><body>
+<div id="viewport"><video id="video" width="1280" height="720" muted playsinline preload="metadata" aria-label="Continuous phone video recording"></video></div>
+<nav aria-label="Video playback"><button id="play">Play</button><button id="back">Back 10 s</button><button id="live">Go live</button><button id="rotate">Rotate video</button><label for="recording">Video session</label><select id="recording"></select></nav>
+<nav aria-label="Video timeline"><label for="seek">Rewind</label><input id="seek" type="range" min="0" max="0" value="0" step="0.001"><span id="time">0:00 / 0:00</span></nav><p id="status" role="status">Waiting for encoded video…</p>
+<script>
+const el=id=>document.getElementById(id),video=el('video'),scan=location.pathname.split('/')[3],root=`/desktop/scans/${encodeURIComponent(scan)}`;
+let hls=null,selected=null,wantedSession=null,rotation=0,following=true,edge=0,currentComplete=false,pendingSeek=null,pausedForSelection=false;
+let pollTimer=null,refreshing=false,refreshRequested=false,closed=false;
+let mediaSwitching=false,programmaticSeeking=false,activeSeekSeconds=null;
+const clock=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+function resize(){if(!video.videoWidth)return;const viewport=el('viewport'),swapped=rotation%180!==0;
+ const w=swapped?video.videoHeight:video.videoWidth,h=swapped?video.videoWidth:video.videoHeight,k=Math.min(viewport.clientWidth/w,viewport.clientHeight/h);
+ video.style.width=`${video.videoWidth*k}px`;video.style.height=`${video.videoHeight*k}px`;video.style.transform=`rotate(${rotation}deg)`;
+}
+new ResizeObserver(resize).observe(el('viewport'));
+function applyPendingSeek(){
+ if(!pendingSeek||pendingSeek.sessionId!==selected||video.readyState<1||mediaSwitching||programmaticSeeking)return false;
+ const target=pendingSeek.seconds,ranges=video.seekable;
+ let available=false;
+ for(let index=0;index<(ranges?.length??0);index++)if(target>=ranges.start(index)-.001&&target<=ranges.end(index)+.001)available=true;
+ if(!ranges?.length&&Number.isFinite(video.duration)&&video.duration>0&&target<=video.duration)available=true;
+ if(!available){el('status').textContent='Selected source frame is not in the playable video segments yet. Waiting for the recording; the source image remains available.';return false}
+ try{
+  video.pause();
+  if(Math.abs(video.currentTime-pendingSeek.seconds)<.0001&&!video.seeking){pendingSeek=null;return true}
+  programmaticSeeking=true;activeSeekSeconds=pendingSeek.seconds;video.currentTime=pendingSeek.seconds;return true;
+ }catch{programmaticSeeking=false;return false}
+}
+video.addEventListener('loadedmetadata',()=>{mediaSwitching=false;resize();applyPendingSeek()});
+video.addEventListener('canplay',applyPendingSeek);
+video.addEventListener('progress',applyPendingSeek);
+video.addEventListener('durationchange',applyPendingSeek);
+video.addEventListener('seeked',()=>{
+ if(pendingSeek?.sessionId===selected&&Math.abs(video.currentTime-pendingSeek.seconds)<.04)pendingSeek=null;
+ programmaticSeeking=false;
+ // A clamped/unavailable target waits for newly published media. Only a newer
+ // user selection can trigger another seek immediately after this one.
+ if(pendingSeek&&pendingSeek.seconds!==activeSeekSeconds)applyPendingSeek();else if(!pendingSeek)announceTime();
+});
+function load(record){
+ mediaSwitching=true;programmaticSeeking=false;hls?.destroy();hls=null;selected=record.id;rotation=record.rotation??0;currentComplete=record.complete;edge=0;video.pause();resize();
+ const url=`${root}/recordings/${encodeURIComponent(record.id)}/index.m3u8`;
+ if(window.Hls?.isSupported()){
+  hls=new Hls({backBufferLength:30,maxBufferLength:30,liveDurationInfinity:true,liveSyncDurationCount:2});
+  hls.on(Hls.Events.LEVEL_UPDATED,(_,data)=>{edge=data.details.edge;currentComplete=!data.details.live;applyPendingSeek()});
+  hls.on(Hls.Events.MANIFEST_PARSED,()=>{if(!pausedForSelection&&!pendingSeek)video.play().catch(()=>{el('status').textContent='Press Play to watch video.'})});
+  hls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)el('status').textContent='Video playback interrupted. Select the session again to reconnect.'});
+  hls.loadSource(url);hls.attachMedia(video);
+ }else if(video.canPlayType('application/vnd.apple.mpegurl')){
+  video.src=url;if(!pausedForSelection&&!pendingSeek)video.play().catch(()=>{});
+ }else el('status').textContent='HLS playback needs browser media support and access to the HLS.js CDN.';
+}
+el('rotate').onclick=()=>{rotation=(rotation+90)%360;resize()};
+el('play').onclick=()=>{following=false;pausedForSelection=false;pendingSeek=null;if(video.paused)video.play().catch(()=>{});else video.pause()};
+el('back').onclick=()=>{following=false;pausedForSelection=false;pendingSeek=null;video.currentTime=Math.max(0,video.currentTime-10)};
+el('live').onclick=()=>{
+ following=true;pausedForSelection=false;pendingSeek=null;wantedSession=null;
+ const next=hls?.liveSyncPosition??(edge||video.duration)-.2;
+ if(Number.isFinite(next))video.currentTime=Math.max(0,next);video.play().catch(()=>{});void refresh();
+};
+el('seek').oninput=()=>{following=false;pausedForSelection=false;pendingSeek=null;video.currentTime=Number(el('seek').value)};
+function announceTime(seconds=video.currentTime){
+ if(mediaSwitching||pendingSeek||programmaticSeeking||video.seeking)return;
+ parent.postMessage({type:'iotdesign-video-time',sessionId:selected,seconds,following,paused:video.paused},location.origin);
+ const end=edge||(Number.isFinite(video.duration)?video.duration:0);
+ el('seek').max=end;el('seek').value=seconds;el('time').textContent=`${clock(seconds)} / ${clock(end)}`;
+ el('status').textContent=pendingSeek?'Loading the selected source frame…':currentComplete?'Recorded video · pause and rewind available':end-seconds>4?'Watching earlier video · Go live to catch up':'Live video · a short playback buffer is expected';
+}
+video.addEventListener('timeupdate',()=>announceTime());
+video.addEventListener('play',()=>{el('play').textContent='Pause'});
+video.addEventListener('pause',()=>{el('play').textContent='Play'});
+// Frame callbacks track displayed media time when available; timeupdate is the
+// fallback. Both use media time, never camera or sensor timestamps.
+function framePresented(_,metadata){if(closed)return;if(Math.abs(metadata.mediaTime-video.currentTime)<.15)announceTime(metadata.mediaTime);video.requestVideoFrameCallback?.(framePresented)}
+video.requestVideoFrameCallback?.(framePresented);
+el('recording').onchange=()=>{following=false;pausedForSelection=false;pendingSeek=null;wantedSession=el('recording').value;selected=null;void refresh()};
+async function refresh(){
+ clearTimeout(pollTimer);if(closed)return;if(refreshing){refreshRequested=true;return}refreshing=true;
+ try{
+  const response=await fetch(root+'/recordings',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('Cannot read video sessions');const records=await response.json();
+  if(closed)return;
+  const ready=records.filter(record=>record.ready),choice=wantedSession??selected??el('recording').value;
+  el('recording').replaceChildren(...records.map((record,index)=>{const option=document.createElement('option');option.value=record.id;option.textContent=`Session ${index+1}${record.complete?' · recorded':' · live'}`;option.disabled=!record.ready;return option}));
+  const record=following?ready.at(-1):ready.find(item=>item.id===choice);
+  if(record){el('recording').value=record.id;if(record.id!==selected)load(record);else applyPendingSeek()}
+  else{if(choice)el('recording').value=choice;el('status').textContent=records.find(item=>item.id===choice)?.error??records.at(-1)?.error??(choice?'The selected session is not playable yet. Its preserved source frame remains available beside the cloud.':'Waiting for the first video segment. Start or resume streaming on the phone.')}
+ }catch(error){el('status').textContent=error.message}
+ finally{refreshing=false;if(!closed){if(refreshRequested){refreshRequested=false;void refresh()}else pollTimer=setTimeout(refresh,1500)}}
+}
+addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.source!==parent||event.data?.type!=='iotdesign-seek-video')return;
+ const {sessionId,seconds}=event.data;
+ if(!/^[a-f0-9]{32}$/.test(sessionId)||!Number.isFinite(seconds)||seconds<0)return;
+ following=false;pausedForSelection=true;wantedSession=sessionId;pendingSeek={sessionId,seconds};
+ if(selected===sessionId)applyPendingSeek();else void refresh();
+});
+// Initialize after the pinned deferred dependency has loaded.
+if(document.readyState==='loading')addEventListener('DOMContentLoaded',()=>void refresh(),{once:true});else void refresh();
+addEventListener('pagehide',()=>{closed=true;clearTimeout(pollTimer);hls?.destroy();video.pause();video.removeAttribute('src');video.load()},{once:true});
+</script></body></html>

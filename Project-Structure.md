@@ -1,5 +1,7 @@
 # Project structure
 
+Reconstruction replay is implemented in `scene.html` and `player.html`, with read-only frame/batch history assembled by `server/iotdesign/timeline.py` and loopback routes in `api.py`. `tests/test_timeline.py` covers historical job binding, access and separate capture/media clocks. Optional image-only COLMAP diagnostics live in `server/iotdesign/colmap_validation.py`; `cli.py` exposes `colmap-check`, and `tests/test_colmap_validation.py` checks evidence gates. Per-run local artifacts are preserved under `data/scans/<scan>/colmap/<run>/`.
+
 ## Source and documentation
 
 ```text
@@ -10,6 +12,8 @@ IotDesign/
 |-- SPEC.md                   Requirements and acceptance status
 |-- README.md                 Installation and operation
 |-- GATES.md                  Recorded validation gates
+|-- MISTAKES.md               Incorrect JPEG interpretation and corrective evidence
+|-- DECISIONS.md              Continuous H.264 transport decision and limits
 |-- pyproject.toml            Python dependencies, CLI, and tool configuration
 |-- server/iotdesign/
 |   |-- cli.py                serve, worker, view, benchmark, doctor, openapi
@@ -53,6 +57,10 @@ Windows entry point: `Start-IoTDesign.cmd` invokes `scripts/start-windows.ps1`. 
 
 Object understanding: `recognition.py` proposes labels, `segmentation.py` creates masks, `object_geometry.py` maps masks to preserved point provenance and applies reversible review edits, and `review.html` displays mask review. Hardware/launcher tests are in `tests/test_hardware.py`; low-memory findings are in `docs/research/windows-low-memory-quantization.md`.
 
+`server/iotdesign/live.py` holds bounded, expiring in-memory phone previews. `api.py` exposes owned preview uploads and loopback reads; `desktop.html` displays the feed. The Android network module's `capturePreview` reads the CameraX camera surface without capturing other UI. `tests/test_live.py` covers expiration and memory bounds; API tests cover preview trust boundaries.
+
+`server/iotdesign/photos.html` is the captured-photo gallery; its loopback metadata, thumbnail, and original-image routes are in `api.py` and covered by API tests.
+
 `data/` holds the SQLite database, server certificate material, uploaded images, reconstruction artifacts, and benchmark media/results. Its default database is `data/iotdesign.sqlite3`. A job exports to `data/scans/<scan-id>/artifacts/<job-id>/`.
 
 `vendor/vggt/` is the local official VGGT checkout. Downloaded checkpoint storage is managed by the model-download library. `.venv/` and `mobile/node_modules/` contain dependencies.
@@ -78,3 +86,19 @@ The semantic recognition stage also uses CPU Grounding DINO Tiny for targeted mi
 | Saved-scene viewing | `viewer.py`; sample showcase in `docs/benchmarks/` |
 
 See [DESIGN.md](DESIGN.md) for data flow and [SPEC.md](SPEC.md) for expected behavior.
+
+Continuous Android video: `mobile/modules/iotdesign-network/android/src/main/java/expo/modules/iotdesignnetwork/VideoCameraView.kt` owns Camera2 capture, MediaCodec H.264 encoding and pinned chunked HTTPS video upload. `src/VideoCamera.tsx` exports that native view. `server/iotdesign/video.py` preserves/decodes incoming video and extracts PC-side model views. `tests/test_video.py` checks real H.264 parsing, preservation, scheduling and trust boundaries.
+
+Progressive reconstruction: `server/iotdesign/streaming.py` schedules immutable snapshots stored in `stream_sessions`/`job_inputs`; `worker.py` reads those inputs and schedules subsequent updates. `scene.html` is the loopback auto-refreshing 3D viewer. `mobile/src/stream.ts` now controls only legacy photo-preview file lifetime. `tests/test_streaming.py` covers job isolation, coalescing, finish and recovery; `mobile/tests/stream.test.mjs` covers legacy persistence/transport/cleanup ordering. `scripts/validate-live-stream.py` exercises GPU snapshots from an existing JPEG fixture; it does not validate video transport.
+
+
+Visual-inertial tracking: native `ArCameraTracking.kt` shares ARCore with video capture, renders the correctly transformed preview and collects timestamped rotation/gyro/acceleration. `/api/scans/{id}/tracking` stores immutable owned metadata. `server/iotdesign/camera_tracking.py` validates and aligns camera/point geometry; `worker.py` freezes per-job metadata. `tests/test_tracking_api.py` covers transport/ownership/snapshot identity and `tests/test_camera_tracking.py` covers alignment, stale/paused/conflicting poses and separate origins.
+
+
+Accumulated tracked map: `server/iotdesign/live_map.py` merges accepted same-origin batches, retains snapshots/provenance and spatially deduplicates without a fixed point cap. `tests/test_live_map.py` covers accumulation, origin separation and full desktop payload above the former render cap.
+
+
+Browser video playback: playback.py copies H.264 to retained fMP4/HLS with FFmpeg; player.html supplies playback/rewind/session/portrait controls. API playback and camera-path routes are loopback-only. scene.html visualizes per-frame ARCore camera trajectory/frusta and source frame IDs; ArCameraTracking.kt anchors the phone-selected floor. tests/test_playback.py checks live segment publication, complete decoded-frame coverage and desktop access boundaries.
+
+
+scene/cameras returns job-bound image-estimated camera poses; camera-path returns paginated sensor measurements with timestamp acceptance, frame IDs and summarized sensor types. player.html and scene.html exchange same-origin frame/session messages for viewpoint/video scrubbing.

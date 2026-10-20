@@ -9,6 +9,7 @@ from pathlib import Path
 from .config import Settings
 from .db import Database, now
 from .reconstruction import check_gpu, reconstruct
+from .streaming import schedule_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -57,14 +58,44 @@ def process_job(db, settings, job, backend, segment_objects=False, semantic_obje
         with db.connect() as connection:
             connection.execute('UPDATE jobs SET stage=?,updated_at=? WHERE id=?', (value, now(), job['id']))
     with db.connect() as connection:
-        paths = [settings.data / r[0] for r in connection.execute(
-            'SELECT path FROM frames WHERE scan_id=? ORDER BY timestamp,id', (job['scan_id'],))]
+        streaming = connection.execute('SELECT 1 FROM stream_sessions WHERE scan_id=?',
+                                       (job['scan_id'],)).fetchone() is not None
+        if streaming:
+            paths = [settings.data / r[0] for r in connection.execute(
+                'SELECT f.path FROM job_inputs i JOIN frames f ON f.id=i.frame_id '
+                'AND f.scan_id=? WHERE i.job_id=? ORDER BY i.ordinal', (job['scan_id'], job['id']))]
+        else:
+            paths = [settings.data / r[0] for r in connection.execute(
+                'SELECT path FROM frames WHERE scan_id=? ORDER BY timestamp,id', (job['scan_id'],))]
     output = settings.data / 'scans' / job['scan_id'] / 'artifacts' / job['id']
     try:
+        # The user requires all valid output points; saved older profiles may
+        # still contain a legacy cap. Explicit CLI caps remain for photo jobs.
+        if streaming:
+            kwargs['max_points'] = 0
+            kwargs['retry'] = False
+            if max_frames < len(paths):
+                raise ValueError('Stream worker frame capacity must cover the entire frozen batch')
+        tracking = {}
+        for path in paths:
+            pose_path = settings.data / 'scans' / job['scan_id'] / 'tracking' / f'{path.stem}.json'
+            if pose_path.exists():
+                tracking[path.stem] = json.loads(pose_path.read_text(encoding='utf-8'))
+        if tracking:
+            output.mkdir(parents=True, exist_ok=True)
+            (output / 'camera-tracking-inputs.json').write_text(json.dumps(tracking), encoding='utf-8')
+            kwargs['camera_tracking'] = tracking
         metrics = backend(paths, output, job['scan_id'], job['id'], count=min(job['frame_count'], max_frames),
                           stage=stage, **kwargs)
+        if streaming and metrics['input_frames'] != len(paths):
+            raise RuntimeError('Stream reconstruction omitted frozen input frames')
         metrics['requested_frames'] = job['frame_count']
-        if segment_objects:
+        if streaming:
+            metrics['input_policy'] = 'all_frames_consecutive_batches'
+        if streaming:
+            from .live_map import accumulate
+            metrics = accumulate(db, settings, job, output, metrics)
+        if segment_objects and not streaming:
             from .reconstruction import evenly_spaced
             from .segmentation import attach_segmentation, segment_frames
             segmentation = segment_frames(evenly_spaced(paths, metrics['input_frames']), output, stage=stage,
@@ -81,7 +112,10 @@ def process_job(db, settings, job, backend, segment_objects=False, semantic_obje
             connection.execute("UPDATE jobs SET state='completed',stage='done',metrics=?,artifact_dir=?,"
                                "updated_at=?,error=NULL WHERE id=?",
                                (json.dumps(metrics), str(output.relative_to(settings.data)), now(), job['id']))
-            connection.execute("UPDATE scans SET state='completed' WHERE id=?", (job['scan_id'],))
+            if streaming:
+                schedule_snapshot(connection, job['scan_id'])
+            else:
+                connection.execute("UPDATE scans SET state='completed' WHERE id=?", (job['scan_id'],))
     except Exception as exc:
         log.exception('Reconstruction failed')
         with db.connect() as connection:

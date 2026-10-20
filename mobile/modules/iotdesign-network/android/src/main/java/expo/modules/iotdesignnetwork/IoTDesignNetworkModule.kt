@@ -1,6 +1,11 @@
 package expo.modules.iotdesignnetwork
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.view.View
+import android.view.ViewGroup
+import androidx.camera.view.PreviewView
+import expo.modules.kotlin.functions.Queues
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import expo.modules.kotlin.modules.Module
@@ -29,6 +34,14 @@ class IoTDesignNetworkModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("IoTDesignNetwork")
     Events("onServiceFound", "onDiscoveryError")
+    View(VideoCameraView::class) {
+      Events("onVideoStatus")
+      Prop("configuration") { view: VideoCameraView, value: Map<String, String>? ->
+        view.reconfigure(value)
+      }
+    }
+    Function("chooseFloor") { VideoCameraView.active?.chooseFloor() }
+    AsyncFunction("stopVideo") { VideoCameraView.active?.stopAndWait() }
 
     Function("startDiscovery") {
       val context = appContext.reactContext ?: throw IllegalStateException("Android context unavailable")
@@ -88,6 +101,41 @@ class IoTDesignNetworkModule : Module() {
         headers: Map<String, String>, body: String?, filePath: String?, fields: Map<String, String> ->
       pinnedRequest(address, method, fingerprint, headers, body, filePath, fields)
     }
+
+    // Read only the camera surface, never the activity or its pairing UI.
+    // A single awaited JS loop owns this cache file until upload completes.
+    AsyncFunction("capturePreview") {
+      val root = appContext.currentActivity?.window?.decorView
+        ?: throw IllegalStateException("Camera activity unavailable")
+      val preview = findPreview(root)
+        ?: throw IllegalStateException("Camera preview unavailable")
+      if (preview.previewStreamState.value != PreviewView.StreamState.STREAMING) {
+        throw IllegalStateException("Waiting for camera preview")
+      }
+      val bitmap = preview.bitmap ?: throw IllegalStateException("Waiting for camera preview")
+      val scale = minOf(1.0, 640.0 / maxOf(bitmap.width, bitmap.height))
+      val small = Bitmap.createScaledBitmap(bitmap,
+        maxOf(1, (bitmap.width * scale).toInt()), maxOf(1, (bitmap.height * scale).toInt()), true)
+      try {
+        val context = appContext.reactContext ?: throw IllegalStateException("Android context unavailable")
+        val file = File(context.cacheDir, "iotdesign-live.jpg")
+        file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 60, it) }
+        mapOf("uri" to file.toURI().toString(), "width" to small.width, "height" to small.height)
+      } finally {
+        if (small !== bitmap) small.recycle()
+        bitmap.recycle()
+      }
+    }.runOnQueue(Queues.MAIN)
+  }
+
+  private fun findPreview(view: View): PreviewView? {
+    if (view is PreviewView && view.isShown) return view
+    if (view is ViewGroup) {
+      for (index in 0 until view.childCount) {
+        findPreview(view.getChildAt(index))?.let { return it }
+      }
+    }
+    return null
   }
 
   private fun pinnedRequest(

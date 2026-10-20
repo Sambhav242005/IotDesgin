@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Captured photos · IoTDesign</title>
+<style>
+:root{color-scheme:dark;font-family:'Segoe UI',sans-serif;background:#111b20;color:#edf2ed}*{box-sizing:border-box}body{margin:0}main{max-width:1200px;margin:auto;padding:36px 24px}a{color:#d2ed94}a:focus-visible{outline:3px solid white;outline-offset:4px}h1{font-size:36px;font-weight:500;overflow-wrap:anywhere}p,figcaption{color:#a2b4b8;line-height:1.6}#photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:24px;margin-top:28px}figure{margin:0}figure a{display:block;background:#0a1112}img{display:block;width:100%;height:240px;object-fit:contain}figcaption{font-size:13px;padding-top:8px}#notice{min-height:24px}
+</style></head><body><main data-scan="SCAN_ID_PLACEHOLDER"><a href="/">← Capture station</a><h1>SCAN_NAME_PLACEHOLDER</h1><p id="count" role="status">Loading captured photos…</p><p>These are the photos saved on this PC for reconstruction. Select any photo to open its original. New uploads appear automatically.</p><p id="notice" role="status"></p><div id="photos"></div></main>
+<script>
+const scanId=document.querySelector('main').dataset.scan;
+const photos=document.getElementById('photos');
+const known=new Set();
+async function refreshPhotos(){try{if(document.hidden)return;const response=await fetch(`/desktop/scans/${encodeURIComponent(scanId)}/frames`,{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('Could not load photos. Check that the PC server is running.');const frames=await response.json();document.getElementById('count').textContent=frames.length?`${frames.length} saved photos`:'No photos uploaded yet. Start or resume capture on your phone.';for(const [index,frame] of frames.entries()){if(known.has(frame.id))continue;known.add(frame.id);const figure=document.createElement('figure');const link=document.createElement('a');link.href=`/desktop/scans/${encodeURIComponent(scanId)}/frames/${encodeURIComponent(frame.id)}`;link.target='_blank';link.rel='noopener';const image=document.createElement('img');image.src=link.href+'?thumbnail=true';image.alt=`Captured photo ${index+1}`;image.loading='lazy';image.decoding='async';link.append(image);const caption=document.createElement('figcaption');caption.textContent=`${index+1} · ${frame.width} × ${frame.height} · ${new Date(frame.timestamp).toLocaleTimeString()}`;figure.append(link,caption);photos.append(figure)}document.getElementById('notice').textContent=''}catch(error){document.getElementById('notice').textContent=error.message}finally{setTimeout(refreshPhotos,3000)}}
+refreshPhotos();
+</script></body></html>

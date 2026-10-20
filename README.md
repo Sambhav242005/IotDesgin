@@ -1,8 +1,19 @@
 # IoTDesign: phone capture to PC reconstruction
 
-IoTDesign captures overlapping room photos on an Android phone, uploads them to a Windows PC on the same Wi-Fi network, and reconstructs a colored point cloud with VGGT. The PC capture station shows scan and GPU worker status; completed scenes open in a local interactive viewer. Coordinates are unscaled.
+IoTDesign streams the Android camera to a Windows PC on the same Wi-Fi network, preserves continuous H.264 video and selects decoded views on the PC, and updates a colored VGGT point cloud as GPU batches complete. The PC capture station shows scan and worker status and opens the auto-refreshing live 3D viewer. Existing photo scans retain their finish-then-reconstruct workflow. Coordinates are unscaled.
 
 ## Start the PC server
+
+The scan's 3D view includes side-by-side source video, source-frame thumbnails, selectable camera markers and completed-batch replay. Select a thumbnail or camera to inspect its source image; use Previous/Next batch, Replay batches and Follow latest to switch saved reconstruction results. Unaligned batches remain independent estimates.
+
+For an independent image-only check of recorded phone camera matrices, install the optional local backend and run from the repository root:
+
+```powershell
+uv pip install --python .venv/Scripts/python.exe pycolmap==4.2.1
+.\.venv\Scripts\python.exe -m iotdesign.cli --data data colmap-check --scan <scan-id>
+```
+
+This CPU diagnostic uses all saved images by default. `--max-frames N` explicitly limits only the diagnostic sample. It writes hash-verified inputs, sparse cameras/PLY and a JSON report under `data/scans/<scan-id>/colmap/<run-id>/`; the latest report appears in the viewer's COLMAP diagnostics. The check compares camera-pose consistency, not raw IMU accuracy or measured dimensions. Bad clocks, inadequate motion, weak geometry or low coverage produce an inconclusive/rejected report. Production VGGT reconstruction and originals are preserved. See [COLMAP documentation](https://colmap.github.io/) for the upstream pipeline.
 
 GPU profiles include a local CPU Grounding DINO `mirror.` pass before SAM 2. Its masks are review proposals; it can miss mirrors or segment reflected contents incorrectly. See [targeted mirror validation](docs/research/grounded-mirror-validation.md).
 
@@ -12,12 +23,12 @@ Windows x64: double-click **`Start-IoTDesign.cmd`**. It installs a managed Pytho
 
 | Automatic profile | Inputs | VGGT storage | Segmentation | Export cap |
 |---|---|---|---|---|
-| High: compatible 10+ GB GPU / 24+ GB RAM | 12 frames, 336 px width | FP32 with mixed-precision inference | SAM 2 Small | 500,000 |
-| Balanced: compatible 6+ GB GPU / 14+ GB RAM | 8 frames, 224 px width | FP16 aggregator / FP32 heads | SAM 2 Small | 300,000 |
-| Low: compatible 4 GB GPU / 12+ GB RAM | 8 frames, 168 px width | FP16 aggregator / FP32 heads | SAM 2 Tiny | 150,000 |
+| High: compatible 10+ GB GPU / 24+ GB RAM | 12 frames, 336 px width | FP32 with mixed-precision inference | SAM 2 Small | Uncapped |
+| Balanced: compatible 6+ GB GPU / 14+ GB RAM | 8 frames, 224 px width | FP16 aggregator / FP32 heads | SAM 2 Small | Uncapped |
+| Low: compatible 4 GB GPU / 12+ GB RAM | 8 frames, 168 px width | FP16 aggregator / FP32 heads | SAM 2 Tiny | Uncapped |
 | ServerOnly: unavailable CUDA or insufficient current free memory | Capture/upload only | No local worker | None | None |
 
-The GTX 1050 Ti / 16 GB laptop targets Low if at least 11 GiB RAM and 3.1 GiB VRAM are currently free and the CUDA smoke test succeeds. Low passed a 3.2 GiB allocation-budget test on the RTX 4070 Ti; physical GTX 1050 Ti validation is pending. Lower resolution loses detail. The point cap controls export size rather than inference memory. Close other applications before starting. See [quantization findings and measurements](docs/research/windows-low-memory-quantization.md).
+The GTX 1050 Ti / 16 GB laptop targets Low if at least 11 GiB RAM and 3.1 GiB VRAM are currently free and the CUDA smoke test succeeds. Low passed a 3.2 GiB allocation-budget test on the RTX 4070 Ti; physical GTX 1050 Ti validation is pending. Lower resolution loses detail. Confidence filtering still applies; export point count is uncapped by default. Stream batches use eight consecutive views across profiles. Close other applications before starting. See [quantization findings and measurements](docs/research/windows-low-memory-quantization.md).
 
 ```powershell
 .\Start-IoTDesign.cmd -PlanOnly
@@ -82,11 +93,15 @@ npx expo run:android
 
 The prebuild creates the ignored native Android project from Expo configuration. The app requests local-network and camera permissions as needed. On its first launch, it searches for the PC for eight seconds. If it finds one PC, enter the code from the PC station and compare the displayed certificate fingerprint. If it finds multiple PCs, select one. The app stores the PC address and pairing token securely, checks the saved PC on later launches, and uses discovery to recover when its address changes. If discovery fails, enter the PC address shown by the desktop station. A scanned pairing QR verifies the certificate and completes pairing directly.
 
-Photos are captured about every two seconds, resized to a maximum 1280-pixel edge, and saved in app storage before upload. The app retries uploads on reconnection; frame IDs make a repeated upload safe. Capture at least eight overlapping views; 12–20 clear views are a better first room scan. Keep the camera moving slowly and avoid blank walls, motion blur, or major lighting changes.
+Android stream scans continuously transmit H.264 video to the PC, which preserves the encoded source and decodes reconstruction views. Existing photo scans and iOS keep their original durable JPEG queue. Move slowly through overlapping views; avoid blur, blank walls and major lighting changes.
+
+While Android video capture runs, **Live phone camera** shows PC-decoded previews; the underlying phone-to-PC transport is continuous H.264. Pause/backgrounding stops video. Resume opens a new video session. The preview clears after three seconds without fresh decoded data. iOS video is pending. A native rebuild/reinstall is required; Metro reload alone is insufficient.
 
 To build an iPhone version, use macOS with Xcode and run `npx expo prebuild --platform ios` followed by `npx expo run:ios`. iOS uses Bonjour and asks the user to allow local-network access. An iPhone device build has not been validated on this Windows host.
 
 ## View a completed scene
+
+To see the captured photos before or after reconstruction, click **View captured photos** under the scan on the PC dashboard. The number shows how many photos are saved. Select a thumbnail to open the original JPEG. The gallery updates as new photos arrive. Phone thumbnails currently become checkmarks after successful upload; the PC retains those images.
 
 The PC capture station lists scans, job state, and reconstruction metrics. Open a completed point cloud with:
 
@@ -142,3 +157,33 @@ npx expo-modules-autolinking resolve --platform apple
 ```
 
 Discovery and camera capture need physical-device testing on a private Wi-Fi network. A native build needs the Android SDK. An iPhone build needs macOS and Xcode.
+
+## Reconstruct while streaming (Android)
+
+Restart the server and GPU worker after updating, then reload the Android development app. The existing native `capturePreview` module is reused, so this change does not itself require a native rebuild; an older APK without that module still needs the development build described above. Start a **new** room scan; old saved photo scans keep their original mode. On the PC dashboard, select **Open live 3D** under that scan.
+
+Move slowly through overlapping views. After eight PC-decoded views, the first GPU batch starts automatically. Four additional frames request the next update; the GPU handles one batch at a time and combines pending requests. You do not have to press Finish to see reconstruction. The source is continuous hardware-encoded H.264 over one pinned HTTPS connection. The PC selects model views after decoding; no timed phone JPEG uploads drive this path. Accepted tracked batches accumulate within one ARCore origin; unaligned results remain independent estimates. This is not a video-rate fused SLAM map. Geometry remains unscaled. The viewer requires WebGL and internet access to its pinned Three.js CDN.
+
+Pause closes video capture and upload. Resume opens a new video session within the scan. Finish waits for encoder drain and the PC video receipt before freezing and completing the last update. All PC-decoded video pictures and received source video are retained; the legacy JPEG-upload limit does not cap video frames. Each video connection is limited to one hour / two GiB. Network failures create gaps; Pause/Resume retries with a fresh stream. There is no offline video queue. Optional object segmentation is skipped for progressive batches. Continuous H.264 from the physical Samsung phone and successful finalization have been verified; clean video-only room quality and reconnect/long-duration acceptance remain pending. See GATES.md.
+
+Transport correction and its rationale: [MISTAKES.md](MISTAKES.md), [DECISIONS.md](DECISIONS.md).
+
+
+## Phone camera tracking
+
+The updated Android native build uses ARCore visual-inertial tracking alongside continuous H.264. Start a new scan and move the phone slowly through a textured, well-lit scene. The status reports ARCore tracking state; lost/initializing tracking is not a reliable pose. Rotation, gyro and acceleration samples are preserved with synchronized camera metadata. The PC applies camera-pose alignment only when timing, movement and consistency checks pass. The viewer reports the result. Existing saved scenes have no motion metadata and are not retroactively corrected. ARCore support and a native rebuild/install are required; this is not an Expo Go feature.
+
+Tracking does not guarantee correct dense geometry. The preview uses ARCore rotation/aspect transforms. Point clouds remain unscaled pending measurement validation, and batch reconstruction is not a fused SLAM map. See SPEC.md and GATES.md for validation status.
+
+
+Fixed export and display point caps are removed. All valid filtered output points are exported and displayed. Accepted synchronized ARCore-aligned batches accumulate into one map for that tracking origin; repeated spatial observations are deduplicated, without a fixed point-count limit. VGGT still uses selected image batches internally and updates at GPU batch latency. This does not yet provide video-rate dense SLAM; unaligned outputs are independent estimates. Historical saved scenes remain unchanged.
+
+
+Room switching: the capture screen exposes **New room**, which stops/drains the current video and returns to room naming. **Start new room** always creates a separate scan, even when another scan is unfinished. The home screen lists unfinished rooms with **Resume this room**. Preserve pending uploads with their original scan IDs and scope visible counts to the current room. New-room capture does not require eight frames or successful reconstruction in the previous room.
+
+
+Live video controls: open a scan's 3D viewer or `/desktop/scans/<scan-id>/player` for Play/Pause, Back 10 s, a rewind slider, session selection and Go live. Playback requires FFmpeg on the PC PATH (or IOTDESIGN_FFMPEG) and native HLS or access to pinned HLS.js 1.7.3. Segments retain all video pictures; a short playback buffer is expected. Android carries portrait rotation without stretching. The stream UI shows video status and measured fps, rather than a row of photo checkmarks.
+
+On the phone, start streaming, tap **Set floor on camera**, then tap the visible floor after moving slowly enough for ARCore to track its plane. An anchored grid confirms selection; a horizontal table is also a plane, so select the actual floor. Each resumed tracking session requires a fresh floor. Frame viewpoints on the PC show the sensor-derived camera trajectory, source IDs, timing validity and position/orientation. Accepted alignment overlays it with the cloud; otherwise the path is a separate estimate.
+
+Every decoded picture enters consecutive overlapping reconstruction batches. The viewer reports processed/received/pending frames. This can build a backlog: all-frame input coverage does not establish 30 reconstructed scenes per second. Physical playback/portrait/floor/path acceptance for the latest APK remains pending.

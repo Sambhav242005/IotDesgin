@@ -76,43 +76,23 @@
       }
     },
     "/api/scans": {
-      "get": {
-        "summary": "List Scans",
-        "operationId": "list_scans_api_scans_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ScanResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Scans Api Scans Get"
-                }
-              }
-            }
-          }
-        },
+      "post": {
+        "summary": "Create Scan",
+        "operationId": "create_scan_api_scans_post",
         "security": [
           {
             "HTTPBearer": []
           }
-        ]
-      },
-      "post": {
-        "summary": "Create Scan",
-        "operationId": "create_scan_api_scans_post",
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ScanRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -135,18 +115,174 @@
               }
             }
           }
-        },
+        }
+      },
+      "get": {
+        "summary": "List Scans",
+        "operationId": "list_scans_api_scans_get",
         "security": [
           {
             "HTTPBearer": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "include_frames",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Frames"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanResponse"
+                  },
+                  "title": "Response List Scans Api Scans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/scans/{scan_id}": {
       "get": {
         "summary": "Scan",
         "operationId": "scan_api_scans__scan_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "include_frames",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Frames"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scans/{scan_id}/tracking": {
+      "post": {
+        "summary": "Upload Tracking",
+        "operationId": "upload_tracking_api_scans__scan_id__tracking_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TrackingSample"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TrackingBatch"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scans/{scan_id}/video": {
+      "post": {
+        "summary": "Video Upload",
+        "operationId": "video_upload_api_scans__scan_id__video_post",
         "security": [
           {
             "HTTPBearer": []
@@ -168,9 +304,131 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScanResponse"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scans/{scan_id}/live": {
+      "put": {
+        "summary": "Live Upload",
+        "operationId": "live_upload_api_scans__scan_id__live_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_live_upload_api_scans__scan_id__live_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Stop Live",
+        "operationId": "stop_live_api_scans__scan_id__live_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/live": {
+      "get": {
+        "summary": "Desktop Live",
+        "operationId": "desktop_live_desktop_scans__scan_id__live_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -234,6 +492,48 @@
                 "schema": {
                   "$ref": "#/components/schemas/FrameResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scans/{scan_id}/stream/finish": {
+      "post": {
+        "summary": "Finish Stream",
+        "operationId": "finish_stream_api_scans__scan_id__stream_finish_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -369,6 +669,421 @@
                 "schema": {
                   "$ref": "#/components/schemas/JobResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/scene": {
+      "get": {
+        "summary": "Desktop Scene",
+        "operationId": "desktop_scene_desktop_scans__scan_id__scene_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/reconstruction-timeline": {
+      "get": {
+        "summary": "Desktop Reconstruction Timeline",
+        "operationId": "desktop_reconstruction_timeline_desktop_scans__scan_id__reconstruction_timeline_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/scene/points": {
+      "get": {
+        "summary": "Desktop Points",
+        "operationId": "desktop_points_desktop_scans__scan_id__scene_points_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/scene/cameras": {
+      "get": {
+        "summary": "Desktop Scene Cameras",
+        "operationId": "desktop_scene_cameras_desktop_scans__scan_id__scene_cameras_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/view": {
+      "get": {
+        "summary": "Desktop View",
+        "operationId": "desktop_view_desktop_scans__scan_id__view_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/camera-path": {
+      "get": {
+        "summary": "Desktop Camera Path",
+        "operationId": "desktop_camera_path_desktop_scans__scan_id__camera_path_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "after_frame",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "After Frame"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/player": {
+      "get": {
+        "summary": "Desktop Player",
+        "operationId": "desktop_player_desktop_scans__scan_id__player_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/recordings": {
+      "get": {
+        "summary": "Desktop Recordings",
+        "operationId": "desktop_recordings_desktop_scans__scan_id__recordings_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/recordings/{session_id}/{filename}": {
+      "get": {
+        "summary": "Desktop Recording",
+        "operationId": "desktop_recording_desktop_scans__scan_id__recordings__session_id___filename__get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -823,6 +1538,138 @@
         }
       }
     },
+    "/desktop/scans/{scan_id}/photos": {
+      "get": {
+        "summary": "Desktop Photos",
+        "operationId": "desktop_photos_desktop_scans__scan_id__photos_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/frames": {
+      "get": {
+        "summary": "Desktop Photos List",
+        "operationId": "desktop_photos_list_desktop_scans__scan_id__frames_get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/desktop/scans/{scan_id}/frames/{frame_id}": {
+      "get": {
+        "summary": "Desktop Photo",
+        "operationId": "desktop_photo_desktop_scans__scan_id__frames__frame_id__get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "frame_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Frame Id"
+            }
+          },
+          {
+            "name": "thumbnail",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Thumbnail"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/desktop/pairing": {
       "post": {
         "summary": "Renew Pairing",
@@ -876,6 +1723,22 @@
             "schema": {
               "type": "string",
               "title": "Filename"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
             }
           }
         ],
@@ -932,6 +1795,48 @@
           "height"
         ],
         "title": "Body_frame_api_scans__scan_id__frames__frame_id__put"
+      },
+      "Body_live_upload_api_scans__scan_id__live_put": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "Body_live_upload_api_scans__scan_id__live_put"
+      },
+      "FloorEstimate": {
+        "properties": {
+          "origin": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Origin"
+          },
+          "normal": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Normal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "origin",
+          "normal"
+        ],
+        "title": "FloorEstimate"
       },
       "FrameResponse": {
         "properties": {
@@ -1012,6 +1917,40 @@
           "fingerprint"
         ],
         "title": "Health"
+      },
+      "ImuSample": {
+        "properties": {
+          "sensor_type": {
+            "type": "integer",
+            "title": "Sensor Type"
+          },
+          "timestamp_ns": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Timestamp Ns"
+          },
+          "accuracy": {
+            "type": "integer",
+            "title": "Accuracy"
+          },
+          "values": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "minItems": 3,
+            "title": "Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sensor_type",
+          "timestamp_ns",
+          "accuracy",
+          "values"
+        ],
+        "title": "ImuSample"
       },
       "JobResponse": {
         "properties": {
@@ -1176,6 +2115,15 @@
             "minLength": 1,
             "title": "Name",
             "default": "Room scan"
+          },
+          "capture_mode": {
+            "type": "string",
+            "enum": [
+              "photos",
+              "stream"
+            ],
+            "title": "Capture Mode",
+            "default": "photos"
           }
         },
         "type": "object",
@@ -1206,6 +2154,11 @@
             "type": "array",
             "title": "Frames"
           },
+          "frame_count": {
+            "type": "integer",
+            "title": "Frame Count",
+            "default": 0
+          },
           "latest_job_id": {
             "anyOf": [
               {
@@ -1216,6 +2169,15 @@
               }
             ],
             "title": "Latest Job Id"
+          },
+          "capture_mode": {
+            "type": "string",
+            "enum": [
+              "photos",
+              "stream"
+            ],
+            "title": "Capture Mode",
+            "default": "photos"
           }
         },
         "type": "object",
@@ -1283,6 +2245,218 @@
           "metrics"
         ],
         "title": "SceneResponse"
+      },
+      "TrackingBatch": {
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/TrackingSample"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "records"
+        ],
+        "title": "TrackingBatch"
+      },
+      "TrackingSample": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$",
+            "title": "Session Id"
+          },
+          "video_frame": {
+            "type": "integer",
+            "maximum": 108001.0,
+            "minimum": 1.0,
+            "title": "Video Frame"
+          },
+          "timestamp_ns": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Timestamp Ns"
+          },
+          "ar_timestamp_ns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ar Timestamp Ns"
+          },
+          "encoder_timestamp_ns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoder Timestamp Ns"
+          },
+          "camera_timestamp_ns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Timestamp Ns"
+          },
+          "timestamp_clock": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "android_camera",
+                  "elapsed_realtime_normalized",
+                  "camera_realtime_from_encoder_uptime"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp Clock"
+          },
+          "encoder_uptime_offset_ns": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoder Uptime Offset Ns"
+          },
+          "sensor_timestamp_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "REALTIME",
+                  "UNKNOWN"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensor Timestamp Source"
+          },
+          "tracking_state": {
+            "type": "string",
+            "enum": [
+              "TRACKING",
+              "PAUSED",
+              "STOPPED",
+              "INITIALIZING"
+            ],
+            "title": "Tracking State"
+          },
+          "tracking_failure": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Failure"
+          },
+          "camera_to_world": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 16,
+                "minItems": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera To World"
+          },
+          "translation": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 3,
+                "minItems": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translation"
+          },
+          "quaternion_xyzw": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quaternion Xyzw"
+          },
+          "floor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FloorEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imu": {
+            "items": {
+              "$ref": "#/components/schemas/ImuSample"
+            },
+            "type": "array",
+            "maxItems": 512,
+            "title": "Imu"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "video_frame",
+          "timestamp_ns",
+          "tracking_state"
+        ],
+        "title": "TrackingSample"
       },
       "ValidationError": {
         "properties": {

@@ -6,7 +6,7 @@ requires-python = ">=3.10,<3.14"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20",
   "pillow>=11,<13", "numpy>=2,<3", "cryptography>=44", "zeroconf>=0.145",
-  "qrcode[pil]>=8", "psutil>=6", "viser>=1,<2", "plyfile>=1"
+  "qrcode[pil]>=8", "psutil>=6", "viser>=1,<2", "plyfile>=1", "av>=16,<18"
 ]
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.28", "ruff>=0.11"]

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IoTDesign · Reconstruction replay</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.181.2/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.181.2/examples/jsm/"}}</script>
+<style>
+:root{color-scheme:dark;font-family:'Segoe UI',sans-serif;background:#111b20;color:#edf2ed}*{box-sizing:border-box}body{margin:0}header{padding:16px 24px;border-bottom:1px solid #354348}h1{font-size:24px;margin:0 0 8px;font-weight:500}p{margin:8px 0;color:#a2b4b8}button,a{background:#d2ed94;color:#14231b;border:0;padding:10px 14px;cursor:pointer;border-radius:3px}button:focus-visible,a:focus-visible{outline:3px solid white;outline-offset:3px}#stage{height:70vh;min-height:320px;content-visibility:auto;contain-intrinsic-size:auto 70vh}canvas{display:block;width:100%;height:100%;touch-action:none}footer{padding:16px 24px}#status{color:#d2ed94}#error{color:#ffb4a2}img{max-width:200px;max-height:200px;object-fit:contain}.preview-box{width:220px;height:220px;display:grid;place-items:center}button:disabled{opacity:.45;cursor:default} .tools{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.workspace{display:grid;grid-template-columns:minmax(300px, .8fr) minmax(0,1.2fr);gap:1px;background:#354348}.source-panel,.cloud-panel{background:#0a1112;min-width:0}.panel-heading{font-size:15px;font-weight:500;margin:0;padding:12px 16px;border-bottom:1px solid #354348}#stage{height:58vh;min-height:380px;contain-intrinsic-size:auto 58vh}#player{width:100%;height:58vh;min-height:380px;border:0;display:block}.bar,.timeline-panel,.sensor-panel{padding:12px 24px;border-bottom:1px solid #354348}.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button,select,input{font:inherit}select{background:#243735;color:#edf2ed;border:1px solid #60776e;padding:8px}input[type=range]{accent-color:#d2ed94;min-width:160px;flex:1}label{display:inline-flex;gap:6px;align-items:center}.filmstrip{display:flex;gap:8px;overflow-x:auto;padding:10px 0;min-height:122px}.frame-card{background:#17262b;color:#c4d1d3;border:2px solid transparent;min-width:108px;width:108px;padding:4px;text-align:left;flex-shrink:0}.frame-card img{width:96px;height:66px;object-fit:contain;display:block;background:#080e10}.frame-card span{font-size:11px;display:block;margin-top:4px}.frame-card[aria-pressed=true]{border-color:#d2ed94;color:#d2ed94}.frame-card[data-status=failed]{border-bottom-color:#ffb4a2}.frame-card[data-status=processing]{border-bottom-color:#81b9d8}.frame-card[data-status=completed]{border-bottom-color:#d2ed94}.source-selection{display:flex;gap:16px;padding:12px 24px;align-items:center;border-bottom:1px solid #354348}.source-selection img{width:144px;height:90px;object-fit:contain;background:#080e10}.source-selection figure{margin:0}.source-selection figcaption{font-size:11px;color:#a2b4b8}#frame-detail{overflow-wrap:anywhere}.sensor-panel summary{cursor:pointer}#comparison{padding:12px 24px}#comparison pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}.muted{color:#a2b4b8}button.secondary{background:#243735;color:#edf2ed;border:1px solid #60776e}[hidden]{display:none!important}@media(max-width:880px){.workspace{grid-template-columns:1fr}#stage,#player{height:48vh;min-height:320px}.bar,.timeline-panel,.source-selection,.sensor-panel{padding:12px}}
+</style></head><body>
+<header><h1>Live room reconstruction · replay</h1><div id="status" role="status">Waiting for uploaded frames and the GPU worker…</div><p id="revision" role="status"></p><p id="error" role="alert"></p></header>
+<main>
+<nav class="bar" aria-label="Completed reconstruction snapshots"><button id="snapshot-prev" class="secondary" disabled>Previous batch</button><button id="snapshot-play" disabled>Replay batches</button><button id="snapshot-next" class="secondary" disabled>Next batch</button><label for="snapshot-index">Completed batch</label><input id="snapshot-index" type="range" min="0" max="0" value="0" disabled><button id="snapshot-live" aria-pressed="true">Follow latest</button><span id="snapshot-detail" role="status">No completed batches yet.</span></nav>
+<div class="workspace"><section class="source-panel" aria-labelledby="source-heading"><h2 id="source-heading" class="panel-heading">01 / Source video</h2><iframe id="player" title="Continuous phone video with pause, rewind and Go live" allow="autoplay; fullscreen"></iframe></section><section class="cloud-panel" aria-labelledby="cloud-heading"><h2 id="cloud-heading" class="panel-heading">02 / Point cloud and source cameras</h2><div id="stage" aria-label="Interactive colored point cloud. Drag to orbit, right-drag to pan, scroll to zoom. Select an orange camera to select its source frame."></div></section></div>
+<section class="source-selection" aria-label="Selected source frame"><figure id="selected-source" hidden><img id="source-image" alt="Selected preserved source frame" width="144" height="90"><figcaption>Preserved source image</figcaption></figure><p id="frame-detail" role="status">Select a source frame or an orange camera. Image-estimated cameras work without phone tracking.</p></section>
+<section class="timeline-panel" aria-label="All received source frames"><div class="tools"><button id="frame-prev" class="secondary">Previous frame</button><button id="frame-next" class="secondary">Next frame</button><label for="source-session">Source session</label><select id="source-session"></select><label for="source-frame">Source frame</label><input id="source-frame" type="range" min="0" max="0" value="0"><a id="gallery" class="secondary">All originals</a></div><p id="timeline-status" class="muted">Waiting for source frames.</p><div id="filmstrip" class="filmstrip" aria-label="Source frame thumbnails"></div><p class="muted">Green: completed batch input · blue: processing · red: failed · gray: received. Replay advances through actual completed GPU batches; individual frames do not imply individual cloud updates.</p></section>
+<section class="bar" aria-label="Point cloud controls"><button id="reset">Reset view</button><a id="download">Download full point cloud</a><label><input id="image-cameras" type="checkbox" checked> Image-estimated cameras (orange)</label><label><input id="camera-images" type="checkbox" checked> Source image planes</label><button id="floor" disabled>Set floor</button><button id="flip" disabled>Flip floor up</button><button id="clear-floor" disabled>Clear floor</button></section>
+<details class="sensor-panel"><summary>Phone sensor evidence and camera trajectory</summary><p>Timing matches and accepted cloud alignment are required. An unregistered sensor path is displayed in its own coordinate space, separately from the cloud.</p><label><input id="show-path" type="checkbox"> Show sensor camera path</label> <label><input id="all-cameras" type="checkbox"> All sensor camera outlines</label><p id="pose-status" role="status">Waiting for phone camera poses. A valid timestamp match is required.</p><label for="pose-session">Tracking session</label> <select id="pose-session"></select> <button id="latest-pose">Follow latest sensor frame</button><p><label for="pose-frame">Sensor frame viewpoint</label> <input id="pose-frame" type="range" min="0" max="0" value="0"></p></details>
+<details id="comparison"><summary>COLMAP comparison diagnostics</summary><p id="comparison-status">No completed COLMAP comparison is recorded for this scan.</p><dl id="comparison-summary"></dl><details id="comparison-raw" hidden><summary>Raw saved report</summary><pre id="comparison-report" tabindex="0"></pre></details></details>
+<footer><p>Drag to orbit · right-drag to pan · scroll to zoom. Orange cameras and source planes belong to the displayed reconstruction.</p><p id="ground-status" role="status">Floor unknown. When floor points are visible, choose Set floor and select three spaced points on that surface.</p><p>Unscaled geometry. Accepted same-origin tracked updates accumulate as GPU batches finish. Unaligned batches replace the view as independent image estimates; unrelated origins are never overlaid.</p></footer></main>
+<script type="module">
+const el=id=>document.getElementById(id);
+const scanId=location.pathname.split('/')[3];
+const root=`/desktop/scans/${encodeURIComponent(scanId)}`;
+el('download').href=root+'/artifacts/cloud.ply';
+el('player').src=root+'/player';
+el('gallery').href=root+'/photos';
+let renderPath=null, renderCloud=null, lastJob=null, previewUrl=null, skipped=false;
+let scene, camera, renderer, controls, cloud;
+let picking=false;
+let pathFrames=[],pathSession=null,pathCursor=0,pathIndex=0,followPose=true,pathSessions=[],requestedVideoFrame=null;
+let timeline={frames:[],snapshots:[]},frameById=new Map(),sessionFrames=new Map(),sourceSession='',sourceFrames=[],sourceIndex=0,selectedFrameId=null;
+let followSnapshots=true,chosenJob=null,replaying=false,replayTimer=null,loadSerial=0,loadingJob=null,stripStart=-1,stripSignature='',updateImageSelection=null,videoSelectionMissing=false;
+const clock=seconds=>Number.isFinite(seconds)?`${Math.floor(seconds/60)}:${(seconds%60).toFixed(2).padStart(5,'0')}`:'time unavailable';
+const selectedFrame=()=>frameById.get(selectedFrameId);
+function sourceUrl(frame){return frame.thumbnail_url??`${root}/frames/${encodeURIComponent(frame.id)}?thumbnail=true`}
+const stage=el('stage');
+function active(){return !document.hidden&&!skipped}
+stage.addEventListener('contentvisibilityautostatechange',event=>{skipped=event.skipped});
+if(!('contentVisibility' in document.documentElement.style)&&'IntersectionObserver' in window){
+  new IntersectionObserver(entries=>{skipped=!entries[0].isIntersecting},{rootMargin:'200px'}).observe(stage);
+}
+try{
+  const THREE=await import('three');
+  const {OrbitControls}=await import('three/addons/controls/OrbitControls.js');
+  scene=new THREE.Scene();scene.background=new THREE.Color('#0a1112');
+  camera=new THREE.PerspectiveCamera(55,1,0.001,1000);camera.up.set(0,-1,0);camera.position.set(2,-1.5,-2);
+  renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  stage.append(renderer.domElement);controls=new OrbitControls(camera,renderer.domElement);
+  const resize=()=>{renderer.setSize(stage.clientWidth,stage.clientHeight);camera.aspect=stage.clientWidth/stage.clientHeight;camera.updateProjectionMatrix()};
+  new ResizeObserver(resize).observe(stage);resize();
+  const reset=()=>{camera.position.set(2,-1.5,-2);controls.target.set(0,0,0);controls.update()};
+  el('reset').onclick=reset;
+  const pathGroup=new THREE.Group(),imageGroup=new THREE.Group();scene.add(pathGroup,imageGroup);
+  const textureLoader=new THREE.TextureLoader();
+  let modelCameras=[],imagePlanes=[],planeSelectionKey=null;
+  const disposeGroup=group=>{group.traverse(item=>{item.geometry?.dispose();if(item.material){item.material.map?.dispose();item.material.dispose()}});group.clear()};
+  const addImagePlane=(entry,selected=false)=>{
+    const frame=frameById.get(entry.frameId);if(!frame)return;
+    const aspect=frame.width&&frame.height?frame.width/frame.height:1.5;
+    const size=.05*radius;
+    const texture=textureLoader.load(sourceUrl(frame));texture.colorSpace=THREE.SRGBColorSpace;
+    const plane=new THREE.Mesh(new THREE.PlaneGeometry(size*1.4,size*1.4/aspect),new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide,transparent:true,opacity:selected ? .95 : .55}));
+    plane.position.z=-size;plane.userData.frameId=entry.frameId;entry.group.add(plane);imagePlanes.push(plane);
+  };
+  updateImageSelection=()=>{
+    const current=modelCameras.find(item=>item.frameId===selectedFrameId);
+    const key=`${current?.frameId??''}:${el('camera-images').checked}`;if(key===planeSelectionKey)return;planeSelectionKey=key;
+    for(const plane of imagePlanes){plane.removeFromParent();plane.geometry.dispose();plane.material.map.dispose();plane.material.dispose()}imagePlanes=[];
+    for(const entry of modelCameras){entry.lines.material.color.set(entry.frameId===selectedFrameId?0xd2ed94:0xe7a367)}
+    if(!el('camera-images').checked)return;
+    const step=Math.max(1,Math.ceil(modelCameras.length/20));
+    for(let index=0;index<modelCameras.length;index+=step){const entry=modelCameras[index];if(entry.frameId!==selectedFrameId)addImagePlane(entry)}
+    if(current)addImagePlane(current,true);
+  };
+  let cameraPointer=null;
+  renderer.domElement.addEventListener('pointerdown',event=>{cameraPointer=[event.clientX,event.clientY]});
+  renderer.domElement.addEventListener('pointerup',event=>{
+    if(picking||event.button!==0||!cameraPointer||Math.hypot(event.clientX-cameraPointer[0],event.clientY-cameraPointer[1])>5||!imageGroup.visible)return;
+    const bounds=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();ray.params.Line.threshold=.015;
+    ray.setFromCamera(new THREE.Vector2((event.clientX-bounds.left)/bounds.width*2-1,-(event.clientY-bounds.top)/bounds.height*2+1),camera);
+    imageGroup.updateMatrixWorld(true);
+    const hit=ray.intersectObjects(imageGroup.children,true).find(item=>item.object.userData.frameId);
+    if(hit)void selectSourceFrame(hit.object.userData.frameId,{seek:true,loadSnapshot:false});
+  });
+  const grid=new THREE.GridHelper(4,40,0xd2ed94,0x425451);grid.visible=false;scene.add(grid);
+  const markers=new THREE.Group();scene.add(markers);
+  let currentTrackingSession=null,pathFramedSession=null;
+  let selected=[], calibration=null, coordinateKey=null, center=new THREE.Vector3(), radius=1, tracked=false;
+  const clearMarkers=()=>{for(const marker of [...markers.children]){markers.remove(marker);marker.geometry.dispose();marker.material.dispose()}};
+  const saveFloor=()=>{try{if(calibration)localStorage.setItem(coordinateKey,JSON.stringify(calibration));else localStorage.removeItem(coordinateKey)}catch{}};
+  const floorMessage=()=>{el('ground-status').textContent=calibration
+    ? `${calibration.source==='phone'?'Floor selected on phone':'Floor selected on PC'} · grid spacing is unscaled · view alignment only; downloaded geometry is unchanged.`
+    : tracked ? 'Gravity orientation available from accepted tracking. Floor height is unknown: select three floor points.'
+    : 'World orientation and floor unknown. Select three spaced floor points to level this view.'};
+  const applyFloor=()=>{
+    cloud.quaternion.identity();cloud.position.set(0,0,0);grid.position.set(0,0,0);grid.quaternion.identity();grid.visible=!!calibration;
+    const up=calibration||tracked?1:-1;
+    if(camera.up.y!==up){
+      const target=controls.target.clone();controls.dispose();camera.up.set(0,up,0);
+      controls=new OrbitControls(camera,renderer.domElement);controls.target.copy(target);
+    }
+    if(calibration){
+      const normal=new THREE.Vector3(...calibration.normal), origin=new THREE.Vector3(...calibration.origin).sub(center).divideScalar(radius);
+      cloud.quaternion.setFromUnitVectors(normal,new THREE.Vector3(0,1,0));
+      cloud.position.copy(origin.applyQuaternion(cloud.quaternion)).negate();
+    }
+    imageGroup.quaternion.copy(cloud.quaternion);imageGroup.position.copy(cloud.position);
+    el('flip').disabled=el('clear-floor').disabled=!calibration;floorMessage();
+  };
+  const resetGroundView=()=>{camera.position.set(2,calibration||tracked||(el('show-path').checked&&pathFrames.some(r=>r.synchronized&&r.tracking_state==='TRACKING'))?1.5:-1.5,-2);controls.target.set(0,0,0);controls.update()};
+  el('reset').onclick=resetGroundView;
+  el('floor').onclick=()=>{
+    stopReplay();
+    picking=!picking;controls.enabled=!picking;selected=[];clearMarkers();
+    el('floor').textContent=picking?'Cancel floor selection':'Set floor';
+    el('flip').disabled=el('clear-floor').disabled=picking||!calibration;
+    if(picking)el('ground-status').textContent='Click 3 spaced points on the same floor, forming a wide triangle. Camera orbit pauses while selecting.';else floorMessage();
+  };
+  el('flip').onclick=()=>{calibration.normal=calibration.normal.map(value=>-value);saveFloor();applyFloor();resetGroundView()};
+  el('clear-floor').onclick=()=>{calibration=null;saveFloor();applyFloor();resetGroundView()};
+  renderer.domElement.addEventListener('pointerdown',event=>{
+    if(!picking||!cloud||event.button!==0)return;
+    const bounds=renderer.domElement.getBoundingClientRect(),ray=new THREE.Raycaster();
+    ray.params.Points.threshold=.012;ray.setFromCamera(new THREE.Vector2((event.clientX-bounds.left)/bounds.width*2-1,-(event.clientY-bounds.top)/bounds.height*2+1),camera);
+    cloud.updateMatrixWorld(true);
+    const hit=ray.intersectObject(cloud,false)[0];if(!hit){el('ground-status').textContent='No point there. Click directly on a visible floor point.';return}
+    const point=new THREE.Vector3().fromBufferAttribute(cloud.geometry.attributes.position,hit.index);
+    if(selected.some(other=>other.distanceTo(point)<.03)){el('ground-status').textContent='Choose points farther apart.';return}
+    selected.push(point);
+    const marker=new THREE.Mesh(new THREE.SphereGeometry(.015,8,8),new THREE.MeshBasicMaterial({color:0xd2ed94,depthTest:false}));
+    marker.position.copy(cloud.localToWorld(point.clone()));markers.add(marker);
+    el('ground-status').textContent=`${selected.length}/3 floor points selected.`;
+    if(selected.length<3)return;
+    const normal=new THREE.Vector3().crossVectors(selected[1].clone().sub(selected[0]),selected[2].clone().sub(selected[0]));
+    const area=normal.length(),length=selected[1].distanceTo(selected[0])*selected[2].distanceTo(selected[0]);
+    if(area<.002||area/length<.15){selected=[];clearMarkers();el('ground-status').textContent='Those points are nearly in a line. Select a wider triangle on the floor.';return}
+    normal.normalize();
+    // The normalized cloud center is zero. Initially choose the side containing it;
+    // the explicit Flip control lets the user correct ambiguous geometry.
+    if(normal.dot(selected[0])>0)normal.negate();
+    calibration={normal:normal.toArray(),origin:selected[0].clone().multiplyScalar(radius).add(center).toArray()};
+    saveFloor();picking=false;controls.enabled=true;clearMarkers();el('floor').textContent='Set floor';applyFloor();resetGroundView();
+  });
+  renderCloud=(buffer,state)=>{
+    const values=new Float32Array(buffer), positions=new Float32Array(values.length/2),colors=new Float32Array(values.length/2);
+    if(values.length%6||!values.length)throw Error('Invalid point-cloud payload');
+    for(let i=0,j=0;i<values.length;i+=6,j+=3){positions.set(values.subarray(i,i+3),j);colors.set(values.subarray(i+3,i+6),j)}
+    const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));
+    geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));geometry.computeBoundingSphere();
+    center=geometry.boundingSphere.center.clone();radius=Math.max(geometry.boundingSphere.radius,0.001);
+    tracked=state.metrics?.camera_tracking?.status==='arcore_aligned';
+    currentTrackingSession=tracked?state.metrics.camera_tracking.session_id:null;
+    const nextKey=`iotdesign-floor:${scanId}:${tracked?state.metrics.camera_tracking.session_id:state.completed_job_id}`;
+    const changed=nextKey!==coordinateKey;
+    if(changed){
+      coordinateKey=nextKey;calibration=null;
+      try{const stored=JSON.parse(localStorage.getItem(coordinateKey));
+        if(stored&&[stored.origin,stored.normal].every(v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite))&&Math.abs(Math.hypot(...stored.normal)-1)<.001)calibration=stored;
+      }catch{}
+    }
+    const phoneFloor=tracked?state.metrics.camera_tracking.floor:null;
+    if(phoneFloor)calibration={origin:phoneFloor.origin,normal:phoneFloor.normal,source:'phone'};
+    geometry.translate(-center.x,-center.y,-center.z);geometry.scale(1/radius,1/radius,1/radius);
+    disposeGroup(imageGroup);modelCameras=[];imagePlanes=[];planeSelectionKey=null;
+    // Overlapping accepted batches may contain the same source camera more than once.
+    const uniqueCameras=new Map((state.cameras??[]).map(record=>[record.frame,record]));
+    const normalization=new THREE.Matrix4().makeScale(1/radius,1/radius,1/radius);normalization.setPosition(center.clone().multiplyScalar(-1/radius));
+    for(const modelCamera of uniqueCameras.values()){
+      if(!Array.isArray(modelCamera.camera_to_world)||modelCamera.camera_to_world.flat().length!==16||!modelCamera.camera_to_world.flat().every(Number.isFinite))continue;
+      const matrix=new THREE.Matrix4().fromArray(modelCamera.camera_to_world.flat()).transpose().multiply(new THREE.Matrix4().makeScale(1,-1,-1));
+      const size=.05*radius;
+      const frame=frameById.get(modelCamera.frame),aspect=frame?.width&&frame?.height?frame.width/frame.height:1.75;
+      const vertices=[new THREE.Vector3(),new THREE.Vector3(-size*.7,-size*.7/aspect,-size),new THREE.Vector3(size*.7,-size*.7/aspect,-size),new THREE.Vector3(size*.7,size*.7/aspect,-size),new THREE.Vector3(-size*.7,size*.7/aspect,-size)],lines=[];
+      for(const [a,b] of [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]])lines.push(vertices[a],vertices[b]);
+      const group=new THREE.Group();group.matrixAutoUpdate=false;group.matrix.copy(normalization).multiply(matrix);
+      const outline=new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(lines),new THREE.LineBasicMaterial({color:0xe7a367}));outline.userData.frameId=modelCamera.frame;group.add(outline);imageGroup.add(group);
+      modelCameras.push({frameId:modelCamera.frame,group,lines:outline});
+    }
+    updateImageSelection();
+    imageGroup.visible=el('image-cameras').checked;
+    if(cloud){scene.remove(cloud);cloud.geometry.dispose();cloud.material.dispose()}
+    cloud=new THREE.Points(geometry,new THREE.PointsMaterial({size:0.006,vertexColors:true}));scene.add(cloud);
+    el('floor').disabled=false;grid.position.set(0,0,0);grid.quaternion.identity();applyFloor();renderPath?.();if(changed)resetGroundView();
+  };
+  renderPath=()=>{
+    for(const item of [...pathGroup.children]){pathGroup.remove(item);item.geometry.dispose();item.material.dispose()}
+    const show=el('show-path').checked;
+    const registered=tracked&&pathSession===currentTrackingSession;
+    const valid=pathFrames.filter(record=>record.tracking_state==='TRACKING'&&record.synchronized&&record.camera_to_world?.length===16&&record.camera_to_world.every(Number.isFinite));
+    const source=valid.map(record=>new THREE.Vector3(...record.camera_to_world.slice(12,15)));
+    pathGroup.visible=show;cloud&&(cloud.visible=!show||registered||!source.length);
+    imageGroup.visible=el('image-cameras').checked&&(!show||registered||!source.length);
+    if(!source.length)return;
+    if(pathFramedSession!==pathSession&&!registered){pathFramedSession=pathSession;resetGroundView()}
+    const box=new THREE.Box3().setFromPoints(source),origin=registered?center:box.getCenter(new THREE.Vector3());
+    const scale=registered?radius:Math.max(box.getSize(new THREE.Vector3()).length()/2,.5);
+    pathGroup.position.copy(origin).multiplyScalar(-1/scale);pathGroup.scale.setScalar(1/scale);pathGroup.quaternion.identity();
+    if(registered){pathGroup.quaternion.copy(cloud.quaternion);pathGroup.position.applyQuaternion(cloud.quaternion).add(cloud.position)}
+    else if(show){
+      if(camera.up.y!==1){const target=controls.target.clone();controls.dispose();camera.up.set(0,1,0);controls=new OrbitControls(camera,renderer.domElement);controls.target.copy(target)}
+      grid.visible=false;
+      const floor=valid.at(-1)?.floor;
+      if(floor){grid.visible=true;grid.position.copy(new THREE.Vector3(...floor.origin).sub(origin).divideScalar(scale));grid.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),new THREE.Vector3(...floor.normal).normalize())}
+    }
+    const geometry=new THREE.BufferGeometry().setFromPoints(source);
+    pathGroup.add(new THREE.Line(geometry,new THREE.LineBasicMaterial({color:0x81b9d8})));
+    pathGroup.add(new THREE.Points(geometry.clone(),new THREE.PointsMaterial({color:0x81b9d8,size:.008*scale})));
+    const current=pathFrames[pathIndex];
+    function frustum(record,color,size){
+      const transform=new THREE.Matrix4().fromArray(record.camera_to_world),vertices=[];
+      const local=[new THREE.Vector3(),new THREE.Vector3(-size*.7,-size*.4,-size),new THREE.Vector3(size*.7,-size*.4,-size),new THREE.Vector3(size*.7,size*.4,-size),new THREE.Vector3(-size*.7,size*.4,-size)].map(p=>p.applyMatrix4(transform));
+      for(const [a,b] of [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]])vertices.push(local[a],local[b]);
+      const shape=new THREE.BufferGeometry().setFromPoints(vertices);pathGroup.add(new THREE.LineSegments(shape,new THREE.LineBasicMaterial({color})))
+    }
+    if(el('all-cameras').checked)for(const record of valid)frustum(record,0x49717b,.025*scale);
+    if(current&&valid.includes(current))frustum(current,0xd2ed94,.12*scale);
+  };
+  el('show-path').onchange=()=>{if(cloud)applyFloor();renderPath();resetGroundView()};
+  el('image-cameras').onchange=()=>renderPath();
+  el('camera-images').onchange=()=>updateImageSelection();
+  el('all-cameras').onchange=()=>renderPath();
+  renderer.setAnimationLoop(()=>{if(active()){controls.update();renderer.render(scene,camera)}});
+}catch(error){el('error').textContent=`3D viewer unavailable: ${error.message}. The viewer needs WebGL and access to its Three.js CDN. Saved PLY downloads still work.`}
+function rebuildSourceSessions(){
+  sessionFrames=new Map();
+  for(const frame of timeline.frames){const key=frame.video_session_id??'photos';if(!sessionFrames.has(key))sessionFrames.set(key,[]);sessionFrames.get(key).push(frame)}
+  for(const frames of sessionFrames.values())frames.sort((a,b)=>(a.video_frame??0)-(b.video_frame??0));
+  if(!sessionFrames.has(sourceSession))sourceSession=[...sessionFrames.keys()].at(-1)??'';
+  const before=el('source-session').value;
+  if([...el('source-session').options].map(option=>option.value).join('|')!==[...sessionFrames.keys()].join('|')){
+    el('source-session').replaceChildren(...[...sessionFrames.keys()].map((id,index)=>{const option=document.createElement('option');option.value=id;option.textContent=id==='photos'?'Photo capture':`Video ${index+1} · ${id.slice(0,8)}`;return option}));
+  }
+  el('source-session').value=sourceSession;sourceFrames=sessionFrames.get(sourceSession)??[];
+  sourceIndex=Math.max(0,sourceFrames.findIndex(frame=>frame.id===selectedFrameId));
+  if(before!==sourceSession)stripStart=-1;
+}
+function drawFilmstrip(){
+  const slider=el('source-frame');slider.max=Math.max(0,sourceFrames.length-1);slider.value=sourceIndex;slider.disabled=!sourceFrames.length;
+  el('frame-prev').disabled=!sourceFrames.length||sourceIndex===0;el('frame-next').disabled=!sourceFrames.length||sourceIndex>=sourceFrames.length-1;
+  // Window thumbnails only; the slider and previous/next controls reach every received frame.
+  const start=Math.max(0,Math.min(sourceFrames.length-72,Math.floor(sourceIndex/24)*24-24));
+  const frames=sourceFrames.slice(start,start+72),signature=frames.map(frame=>`${frame.id}:${frame.status}`).join('|');
+  if(start!==stripStart||signature!==stripSignature){
+    stripStart=start;stripSignature=signature;
+    el('filmstrip').replaceChildren(...frames.map((frame,index)=>{
+      const button=document.createElement('button');button.className='frame-card';button.dataset.frameId=frame.id;button.dataset.status=frame.status;
+      button.setAttribute('aria-pressed',String(frame.id===selectedFrameId));button.setAttribute('aria-label',`Source frame ${frame.video_frame??start+index+1}, ${frame.status}`);
+      const image=document.createElement('img');image.src=sourceUrl(frame);image.alt='';image.width=96;image.height=66;image.loading='lazy';image.decoding='async';
+      const label=document.createElement('span');label.textContent=`${frame.video_frame??start+index+1} · ${frame.status}`;
+      const time=document.createElement('span');time.textContent=clock(frame.video_pts_seconds);
+      button.append(image,label,time);button.addEventListener('click',()=>void selectSourceFrame(frame.id,{seek:true}));return button;
+    }));
+  }else for(const button of el('filmstrip').children)button.setAttribute('aria-pressed',String(button.dataset.frameId===selectedFrameId));
+  const counts={received:0,processing:0,completed:0,failed:0};for(const frame of sourceFrames)counts[frame.status]=(counts[frame.status]??0)+1;
+  el('timeline-status').textContent=`${sourceFrames.length.toLocaleString()} frames in this source session · ${counts.completed} completed · ${counts.processing} processing · ${counts.received} received · ${counts.failed} failed. Showing thumbnails ${sourceFrames.length?start+1:0}–${Math.min(start+72,sourceFrames.length)}; use the frame slider for the full recording.`;
+}
+function describeSourceFrame(){
+  const frame=selectedFrame();if(!frame)return;
+  el('selected-source').hidden=false;const url=sourceUrl(frame);if(el('source-image').getAttribute('src')!==url)el('source-image').src=url;
+  const current=timeline.snapshots.find(snapshot=>snapshot.job_id===lastJob),belongs=current?.frame_ids.includes(frame.id);
+  const timing=frame.video_time_source==='nominal_remux_30fps'?'30 fps remux media time; not sensor timing':'media time unavailable; exact video seeking disabled';
+  const capture=Number.isFinite(frame.capture_elapsed_seconds)?` Measured capture elapsed: ${frame.capture_elapsed_seconds.toFixed(3)} s (${frame.capture_time_source}).`:'';
+  el('frame-detail').textContent=`${frame.id} | ${frame.status} | ${clock(frame.video_pts_seconds)} (${timing}).${capture} ${belongs?'Input to the displayed completed batch.':'Not a frozen input of the displayed batch; a camera may be present in its accepted accumulated map.'} Green highlights the matching image-estimated camera when available. Image planes are thumbnail markers, not measured surfaces.`;
+}
+async function selectSourceFrame(id,{seek=false,loadSnapshot=true}={}){
+  const frame=frameById.get(id);if(!frame)return;
+  videoSelectionMissing=false;
+  selectedFrameId=id;sourceSession=frame.video_session_id??'photos';sourceFrames=sessionFrames.get(sourceSession)??[];sourceIndex=Math.max(0,sourceFrames.findIndex(item=>item.id===id));el('source-session').value=sourceSession;
+  drawFilmstrip();describeSourceFrame();updateImageSelection?.();
+  if(frame.video_session_id){
+    if(pathSession!==frame.video_session_id){pathSession=frame.video_session_id;pathFrames=[];pathCursor=0;pathIndex=0;el('pose-session').value=pathSession}
+    requestedVideoFrame=frame.video_frame;const pose=pathFrames.findIndex(record=>record.frame_id===id);
+    if(pose>=0){followPose=false;pathIndex=pose;displayPose()}
+    if(seek&&Number.isFinite(frame.video_pts_seconds))el('player').contentWindow?.postMessage({type:'iotdesign-seek-video',sessionId:frame.video_session_id,seconds:frame.video_pts_seconds,frame:frame.video_frame},location.origin);
+  }
+  if(loadSnapshot){
+    const current=timeline.snapshots.find(snapshot=>snapshot.job_id===lastJob);
+    if(!current?.frame_ids.includes(id)){
+      const snapshot=timeline.snapshots.findLast(item=>item.frame_ids.includes(id));
+      if(snapshot&&snapshot.job_id!==chosenJob){stopReplay();followSnapshots=false;await loadCompletedSnapshot(snapshot.job_id)}
+    }
+  }
+}
+function updateSnapshotControls(){
+  const index=timeline.snapshots.findIndex(snapshot=>snapshot.job_id===(chosenJob??lastJob)),count=timeline.snapshots.length;
+  el('snapshot-index').max=Math.max(0,count-1);el('snapshot-index').value=Math.max(0,index);el('snapshot-index').disabled=!count||picking;
+  el('snapshot-prev').disabled=index<=0||picking;el('snapshot-next').disabled=index<0||index>=count-1||picking;
+  el('snapshot-play').disabled=count<2||picking;el('snapshot-play').textContent=replaying?'Pause replay':'Replay batches';el('snapshot-play').setAttribute('aria-pressed',String(replaying));el('snapshot-live').setAttribute('aria-pressed',String(followSnapshots));
+  const snapshot=timeline.snapshots[index];
+  el('snapshot-detail').textContent=snapshot?`Batch ${index+1} / ${count} · ${snapshot.frame_ids.length} frozen inputs · ${snapshot.point_count?.toLocaleString()??'unknown'} points · ${snapshot.tracking_status.replaceAll('_',' ')}${loadingJob?' · loading':''}`:'No completed batches yet.';
+}
+async function loadCompletedSnapshot(jobId){
+  if(!jobId||picking)return;chosenJob=jobId;
+  if(!renderCloud){el('download').href=root+'/artifacts/cloud.ply?job_id='+encodeURIComponent(jobId);el('revision').textContent=`Selected completed batch ${jobId.slice(0,8)}. 3D rendering is unavailable; source frames and download remain available.`;updateSnapshotControls();return}
+  if(jobId===lastJob){++loadSerial;loadingJob=null;updateSnapshotControls();return}
+  if(jobId===loadingJob)return;
+  const serial=++loadSerial;loadingJob=jobId;updateSnapshotControls();
+  try{
+    const query='?job_id='+encodeURIComponent(jobId);
+    const responses=await Promise.all([fetch(root+'/scene'+query,{cache:'no-store',signal:AbortSignal.timeout(10000)}),fetch(root+'/scene/points'+query,{cache:'no-store',signal:AbortSignal.timeout(30000)}),fetch(root+'/scene/cameras'+query,{cache:'no-store',signal:AbortSignal.timeout(10000)})]);
+    if(responses.some(response=>!response.ok))throw Error('Could not load the selected completed batch');
+    const [state,buffer,cameras]=await Promise.all([responses[0].json(),responses[1].arrayBuffer(),responses[2].json()]);
+    if(serial!==loadSerial||chosenJob!==jobId||picking)return;
+    if(state.completed_job_id!==jobId)throw Error('Completed batch identity changed');
+    state.cameras=cameras;renderCloud?.(buffer,state);lastJob=jobId;el('error').textContent='';
+    el('download').href=root+'/artifacts/cloud.ply'+query;
+    el('revision').textContent=`Displayed ${followSnapshots?'latest':'historical'} batch ${jobId.slice(0,8)} · ${state.metrics?.input_frames??cameras.length} input frames · ${state.metrics?.live_map?'accepted same-origin accumulated map':'independent image estimate'} · unscaled`;
+    describeSourceFrame();
+  }catch(error){if(serial===loadSerial)el('error').textContent=`${error.message}. The previous completed cloud remains visible.`}
+  finally{if(serial===loadSerial){loadingJob=null;updateSnapshotControls()}}
+}
+function stopReplay(){replaying=false;clearTimeout(replayTimer);updateSnapshotControls()}
+async function chooseSnapshot(index,{seek=true}={}){
+  const snapshot=timeline.snapshots[Math.max(0,Math.min(timeline.snapshots.length-1,index))];if(!snapshot||picking)return;
+  followSnapshots=false;await loadCompletedSnapshot(snapshot.job_id);
+  if(chosenJob!==snapshot.job_id||lastJob!==snapshot.job_id)return;
+  const id=snapshot.frame_ids.at(-1);if(id)await selectSourceFrame(id,{seek,loadSnapshot:false});
+}
+async function replayStep(){
+  if(!replaying||picking)return;
+  const index=timeline.snapshots.findIndex(snapshot=>snapshot.job_id===chosenJob),next=index+1;
+  if(next>=timeline.snapshots.length){stopReplay();return}
+  await chooseSnapshot(next);if(replaying)replayTimer=setTimeout(replayStep,1400);
+}
+el('snapshot-prev').onclick=()=>{stopReplay();void chooseSnapshot(timeline.snapshots.findIndex(snapshot=>snapshot.job_id===chosenJob)-1)};
+el('snapshot-next').onclick=()=>{stopReplay();void chooseSnapshot(timeline.snapshots.findIndex(snapshot=>snapshot.job_id===chosenJob)+1)};
+el('snapshot-index').oninput=()=>{stopReplay();void chooseSnapshot(Number(el('snapshot-index').value))};
+el('snapshot-play').onclick=async()=>{
+  if(replaying){stopReplay();return}followSnapshots=false;replaying=true;updateSnapshotControls();
+  if(chosenJob===timeline.snapshots.at(-1)?.job_id)await chooseSnapshot(0);
+  if(replaying)replayTimer=setTimeout(replayStep,1400);
+};
+el('snapshot-live').onclick=()=>{stopReplay();followSnapshots=true;void loadCompletedSnapshot(timeline.snapshots.at(-1)?.job_id);updateSnapshotControls()};
+el('source-frame').oninput=()=>{stopReplay();const frame=sourceFrames[Number(el('source-frame').value)];if(frame)void selectSourceFrame(frame.id,{seek:true})};
+el('frame-prev').onclick=()=>{stopReplay();const frame=sourceFrames[sourceIndex-1];if(frame)void selectSourceFrame(frame.id,{seek:true})};
+el('frame-next').onclick=()=>{stopReplay();const frame=sourceFrames[sourceIndex+1];if(frame)void selectSourceFrame(frame.id,{seek:true})};
+el('source-session').onchange=()=>{stopReplay();sourceSession=el('source-session').value;sourceFrames=sessionFrames.get(sourceSession)??[];stripStart=-1;if(sourceFrames[0])void selectSourceFrame(sourceFrames[0].id,{seek:true})};
+function frameAtTime(session,seconds){
+  const frames=sessionFrames.get(session);if(!frames?.length||!Number.isFinite(seconds)||seconds<0)return null;
+  // FFmpeg assigns the retained H.264 recording 30 fps media timestamps. This
+  // ordinal association is independent of capture and sensor clocks. Missing
+  // historical source frames have no selection; never substitute a neighbor.
+  const ordinal=Math.floor(seconds*30+1e-6)+1;
+  let low=0,high=frames.length;
+  while(low<high){const middle=(low+high)>>>1;if(frames[middle].video_frame<ordinal)low=middle+1;else high=middle}
+  const frame=frames[low];return frame?.video_frame===ordinal&&frame.video_time_source==='nominal_remux_30fps'?frame:null;
+}
+function renderComparison(report){
+  const comparison=report.comparison??{},reconstruction=report.reconstruction??{},quality=reconstruction.quality??{};
+  const words=value=>String(value??'unavailable').replaceAll('_',' '),number=(value,unit='')=>Number.isFinite(value)?`${value.toFixed(3)}${unit}`:'unavailable';
+  el('comparison-status').textContent=`Phone camera matrices: ${words(comparison.status??report.status)}. ${words(comparison.reason)}. This compares camera estimates; it does not establish ground truth or physical scale.`;
+  const rows=[['Registered source cameras',`${comparison.registered_frames??'unknown'} / ${comparison.selected_frames??report.selected_frames??'unknown'}`],['Synchronized registered camera pairs',String(comparison.matched_cameras??0)],['COLMAP point count',String(reconstruction.points??'unknown')],['Geometry support checks',`${words(quality.status)}${quality.reasons?.length?' | '+quality.reasons.map(words).join(', '):''}; heuristic checks do not prove accurate room geometry.`],['Reprojection error',number(quality.mean_reprojection_error_px,' px')],['Frame evidence',Object.entries(comparison.frame_status_counts??{}).map(([key,count])=>`${words(key)}: ${count}`).join(' | ')||'unavailable']];
+  for(const session of comparison.sessions??[])rows.push([`Session ${String(session.session_id??'unknown').slice(0,8)}`,`${words(session.status)} | ${words(session.reason)} | ${session.matched_cameras??0} pairs | position RMSE ${number(session.position_rmse_m,' m')} | orientation median ${number(session.median_orientation_error_deg,' degrees')}, max ${number(session.max_orientation_error_deg,' degrees')}`]);
+  el('comparison-summary').replaceChildren(...rows.flatMap(([label,value])=>{const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;return [term,description]}));
+  el('comparison-report').textContent=JSON.stringify(report,null,2);el('comparison-raw').hidden=false;
+}
+async function pollTimeline(){try{
+  if(document.hidden)return;
+  const response=await fetch(root+'/reconstruction-timeline',{cache:'no-store',signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('Source-frame timeline unavailable');
+  timeline=await response.json();frameById=new Map(timeline.frames.map(frame=>[frame.id,frame]));rebuildSourceSessions();
+  if(!selectedFrameId&&!videoSelectionMissing&&sourceFrames.length)selectedFrameId=sourceFrames[0].id;
+  drawFilmstrip();describeSourceFrame();updateSnapshotControls();
+  if(timeline.comparison)renderComparison(timeline.comparison);
+  if(followSnapshots&&timeline.snapshots.length)await loadCompletedSnapshot(timeline.snapshots.at(-1).job_id);
+ }catch(error){el('timeline-status').textContent=error.message}finally{setTimeout(pollTimeline,2500)}}
+async function refresh(){
+  try{
+    if(document.hidden)return;
+    const response=await fetch(root+'/scene',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+    if(!response.ok)throw Error('Could not read reconstruction status');
+    const state=await response.json(),job=state.latest_job;
+    el('status').textContent=job?`${job.state} · ${job.stage}${state.metrics?.point_count!=null?' · '+state.metrics.point_count.toLocaleString()+' saved points':''}`:'Waiting for 8 uploaded frames and the GPU worker…';
+    el('status').textContent+=` · ${state.processed_frames??0}/${state.received_frames??0} frames processed · ${state.pending_frames??0} pending`;
+    if(job?.error)el('status').textContent+=` · ${job.error}`;
+    if(state.metrics?.camera_tracking)el('status').textContent+=` · camera tracking: ${state.metrics.camera_tracking.status.replaceAll('_',' ')}`;
+    if(followSnapshots&&state.completed_job_id&&renderCloud)await loadCompletedSnapshot(state.completed_job_id);
+  }catch(error){el('error').textContent=`Reconnecting: ${error.message}. The last completed cloud remains visible.`}
+  finally{setTimeout(refresh,2000)}
+}
+function displayPose(){
+ const record=pathFrames[pathIndex];el('pose-frame').max=Math.max(0,pathFrames.length-1);el('pose-frame').value=pathIndex;
+ if(!record){el('pose-status').textContent='No recorded phone poses for this session. Earlier video without sensors cannot provide this path. Orange camera outlines come from image estimates, not mobile sensors.';renderPath?.();return}
+ const position=record.translation??record.camera_to_world?.slice(12,15);
+ const xyz=position?position.map(value=>Number(value).toFixed(3)).join(', '):'unavailable';
+ const names={1:'accelerometer',4:'gyroscope',10:'linear acceleration',11:'rotation vector'};
+ const sensors=(record.imu_sensor_types??[]).map(type=>names[type]??type).join(', ')||'none in this packet';
+ el('pose-status').textContent=`Frame ${record.video_frame} | ${record.frame_id} | ${record.tracking_state}${record.tracking_failure&&record.tracking_failure!=='NONE'?' ('+record.tracking_failure+')':''} | time match: ${record.clock_offset_ms?.toFixed(1)??'unknown'} ms${record.synchronized?'':' - rejected'} | position X,Y,Z: ${xyz} (ARCore estimate) | ${record.imu_sample_count} IMU samples (${sensors}) | blue: camera path, green: selected viewpoint. Sensor path is shown separately when cloud alignment is unavailable.`;
+ renderPath?.();
+}
+el('pose-frame').oninput=()=>{followPose=false;pathIndex=Number(el('pose-frame').value);displayPose();const record=pathFrames[pathIndex];if(record)void selectSourceFrame(record.frame_id,{seek:true,loadSnapshot:false})};
+el('latest-pose').onclick=()=>{followPose=true;pathIndex=Math.max(0,pathFrames.length-1);displayPose()};
+el('pose-session').onchange=()=>{pathSession=el('pose-session').value;pathFrames=[];pathCursor=0;pathIndex=0;followPose=false;displayPose()};
+addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.source!==el('player').contentWindow||event.data?.type!=='iotdesign-video-time')return;
+ if(!/^[a-f0-9]{32}$/.test(event.data.sessionId)||!Number.isFinite(event.data.seconds))return;
+ const frame=frameAtTime(event.data.sessionId,event.data.seconds);
+ if(frame){if(frame.id!==selectedFrameId)void selectSourceFrame(frame.id,{loadSnapshot:!replaying&&event.data.following!==true})}
+ else{
+   videoSelectionMissing=true;selectedFrameId=null;el('selected-source').hidden=true;
+   el('frame-detail').textContent=`No preserved source frame matches playback frame ${Math.floor(event.data.seconds*30+1e-6)+1} in this session. Video playback remains available; source-camera selection is cleared. Historical sparse capture does not establish every-frame reconstruction.`;
+   for(const button of el('filmstrip').children)button.setAttribute('aria-pressed','false');updateImageSelection?.();pathIndex=-1;displayPose();
+ }
+});
+async function pollPoses(){try{
+ if(!active()||picking)return;
+ const requestedSession=pathSession;
+ const url=root+'/camera-path?after_frame='+pathCursor+(pathSession?'&session_id='+encodeURIComponent(pathSession):'');
+ const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('Camera path unavailable');const data=await response.json();
+ if(pathSession!==requestedSession&&pathSession!==data.session_id)return;
+ if(!pathSession)pathSession=data.session_id;
+ if(JSON.stringify(data.sessions)!==JSON.stringify(pathSessions)){pathSessions=data.sessions;el('pose-session').replaceChildren(...data.sessions.map(id=>{const option=document.createElement('option');option.value=id;option.textContent=id.slice(0,8);return option}));el('pose-session').value=pathSession??''}
+ pathFrames.push(...data.frames);pathCursor=data.next_frame;if(requestedVideoFrame!==null){const index=pathFrames.findIndex(record=>record.video_frame===requestedVideoFrame);if(index>=0){pathIndex=index;followPose=false;requestedVideoFrame=null}}if(followPose)pathIndex=Math.max(0,pathFrames.length-1);if(data.frames.length||!pathFrames.length)displayPose();
+ }catch(error){el('pose-status').textContent=error.message}finally{setTimeout(pollPoses,500)}}
+void pollPoses();
+void pollTimeline();
+void refresh();
+addEventListener('pagehide',()=>{stopReplay();++loadSerial;if(previewUrl)URL.revokeObjectURL(previewUrl);renderer?.dispose();controls?.dispose()},{once:true});
+</script></body></html>

@@ -21,6 +21,9 @@ export type PinnedResponse = {
 };
 
 type NativeNetwork = {
+  chooseFloor(): void;
+  stopVideo(): Promise<void>;
+  capturePreview(): Promise<{ uri: string; width: number; height: number }>;
   startDiscovery(): void;
   stopDiscovery(): void;
   request(
@@ -40,6 +43,9 @@ const native = requireNativeModule<NativeNetwork>('IoTDesignNetwork');
 export const startDiscovery = () => native.startDiscovery();
 export const stopDiscovery = () => native.stopDiscovery();
 export const request = native.request.bind(native);
+export const capturePreview = () => native.capturePreview();
+export const chooseFloor = () => native.chooseFloor();
+export const stopVideo = () => native.stopVideo();
 export const onServiceFound = (listener: NetworkEvents['onServiceFound']) =>
   native.addListener('onServiceFound', listener);
 export const onDiscoveryError = (listener: NetworkEvents['onDiscoveryError']) =>

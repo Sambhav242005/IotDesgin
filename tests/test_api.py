@@ -42,6 +42,92 @@ def new_scan(client, headers):
     return response.json()["id"]
 
 
+def test_live_preview_auth_ownership_validation_and_freezing(tmp_path):
+    client, app = make_client(tmp_path)
+    with client:
+        headers = pair(client, app)
+        scan_id = new_scan(client, headers)
+        path = f'/api/scans/{scan_id}/live'
+        desktop = f'/desktop/scans/{scan_id}/live'
+        content = jpeg()
+        files = {'image': ('preview.jpg', content, 'image/jpeg')}
+        assert client.put(path, files=files).status_code == 401
+        other = pair(client, app)
+        assert client.put(path, headers=other, files=files).status_code == 404
+        assert client.delete(path, headers=other).status_code == 404
+        assert client.get(desktop).status_code == 204
+        assert client.put(path, headers=headers, files=files).status_code == 200
+        assert client.get('/desktop/status').json()['live_scan_ids'] == [scan_id]
+        response = client.get(desktop)
+        assert response.content == content
+        assert response.headers['cache-control'] == 'no-store'
+        assert client.get(f'/api/scans/{scan_id}', headers=headers).json()['frames'] == []
+        assert client.put(path, headers=headers,
+                          files={'image': ('bad.jpg', b'bad', 'image/jpeg')}).status_code == 422
+        assert client.put(path, headers=headers,
+                          files={'image': ('big.jpg', b'x' * (512 * 1024 + 1), 'image/jpeg')}).status_code == 413
+        wide = BytesIO()
+        Image.new('RGB', (641, 10)).save(wide, format='JPEG')
+        assert client.put(path, headers=headers,
+                          files={'image': ('wide.jpg', wide.getvalue(), 'image/jpeg')}).status_code == 422
+        assert client.delete(path, headers=headers).status_code == 204
+        assert client.get('/desktop/status').json()['live_scan_ids'] == []
+        assert client.get(desktop).status_code == 204
+        assert client.put(path, headers=headers, files=files).status_code == 200
+        with app.state.db.connect() as connection:
+            connection.execute("UPDATE scans SET state='frozen' WHERE id=?", (scan_id,))
+        assert client.put(path, headers=headers, files=files).status_code == 409
+        assert client.get(desktop).status_code == 204
+
+
+def test_live_preview_desktop_is_local_and_revocation_hides_feed(tmp_path):
+    client, app = make_client(tmp_path)
+    with client:
+        headers = pair(client, app)
+        scan_id = new_scan(client, headers)
+        assert client.put(f'/api/scans/{scan_id}/live', headers=headers,
+                          files={'image': ('live.jpg', jpeg(), 'image/jpeg')}).status_code == 200
+        remote = TestClient(app, client=('192.168.1.50', 1234))
+        assert remote.get(f'/desktop/scans/{scan_id}/live').status_code == 403
+        assert client.delete('/api/pair', headers=headers).status_code == 204
+        assert client.get(f'/desktop/scans/{scan_id}/live').status_code == 204
+        assert client.get('/desktop/status').json()['live_scan_ids'] == []
+
+
+def test_saved_photo_gallery_original_thumbnail_and_local_access(tmp_path):
+    client, app = make_client(tmp_path)
+    with client:
+        headers = pair(client, app)
+        scan_id = new_scan(client, headers)
+        root = f'/desktop/scans/{scan_id}'
+        assert client.get(root + '/frames').json() == []
+        content = jpeg()
+        assert upload(client, headers, scan_id, 'photo-1', content=content).status_code == 200
+        gallery = client.get(root + '/photos')
+        assert gallery.status_code == 200
+        assert f'data-scan="{scan_id}"' in gallery.text
+        frames = client.get(root + '/frames').json()
+        assert len(frames) == 1 and frames[0]['id'] == 'photo-1'
+        assert 'path' not in frames[0]
+        original = client.get(root + '/frames/photo-1')
+        assert original.content == content
+        assert original.headers['cache-control'] == 'no-store'
+        thumbnail = client.get(root + '/frames/photo-1?thumbnail=true')
+        assert thumbnail.status_code == 200
+        with Image.open(BytesIO(thumbnail.content)) as image:
+            assert max(image.size) <= 320
+        assert client.get(root + '/frames/missing').status_code == 404
+        assert client.get('/desktop/scans/missing/photos').status_code == 404
+        assert client.get('/desktop/scans/missing/frames').status_code == 404
+        assert client.get('/desktop/status').json()['scans'][0]['frame_count'] == 1
+        remote = TestClient(app, client=('192.168.1.50', 1234))
+        for path in ['/photos', '/frames', '/frames/photo-1', '/frames/photo-1?thumbnail=true']:
+            assert remote.get(root + path).status_code == 403
+        with app.state.db.connect() as connection:
+            connection.execute('UPDATE scans SET name=? WHERE id=?', ('<script>test</script>', scan_id))
+        assert '<h1>&lt;script&gt;test&lt;/script&gt;</h1>' in client.get(root + '/photos').text
+
+
 def test_pairing_authentication_and_health_metadata(tmp_path):
     client, app = make_client(tmp_path)
     with client:

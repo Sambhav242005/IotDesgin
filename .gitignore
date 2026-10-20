@@ -19,3 +19,6 @@ mobile/modules/*/android/.gradle/
 !.env.example
 *.log
 .unlazy/
+.archify/
+work/routing-harness/
+work/showcase-html-guidance.txt

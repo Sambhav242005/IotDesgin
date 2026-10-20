@@ -86,7 +86,7 @@ def check_gpu(repo):
 
 def reconstruct(paths, output, scan_id, job_id, count=12, repo=Path('vendor/vggt'),
                 resolution=336, stage=lambda value: None, retry=True, weight_precision='fp32',
-                max_points=500000):
+                max_points=0, camera_tracking=None):
     import torch
     from huggingface_hub import hf_hub_download
 
@@ -94,7 +94,7 @@ def reconstruct(paths, output, scan_id, job_id, count=12, repo=Path('vendor/vggt
     check_gpu(repo)
     if resolution < 140 or resolution % 14:
         raise ValueError('Resolution must be a multiple of 14, at least 140')
-    if weight_precision not in {'fp32', 'fp16'} or max_points < 1:
+    if weight_precision not in {'fp32', 'fp16'} or max_points < 0:
         raise ValueError('Unsupported weight precision or point limit')
     if str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
@@ -177,7 +177,7 @@ def reconstruct(paths, output, scan_id, job_id, count=12, repo=Path('vendor/vggt
             source_uv = source_uv[mask]
             points, colors = points[mask], rgb[mask]
             # Deterministic cap keeps browser scenes manageable; original images are retained.
-            if len(points) > max_points:
+            if max_points and len(points) > max_points:
                 selection = np.linspace(0, len(points) - 1, max_points, dtype=int)
                 points, colors = points[selection], colors[selection]
                 frame_index, source_uv = frame_index[selection], source_uv[selection]
@@ -189,7 +189,10 @@ def reconstruct(paths, output, scan_id, job_id, count=12, repo=Path('vendor/vggt
                                 'camera_to_world': np.linalg.inv(homogeneous).tolist(),
                                 'intrinsics': intrinsic[index].tolist(),
                                 'width': resolution, 'height': height})
+            from .camera_tracking import align_to_tracking
+            points, cameras, tracking_metrics = align_to_tracking(points, cameras, camera_tracking or {})
             metrics = {'backend': 'official_vggt', 'device': torch.cuda.get_device_name(0),
+                       'camera_tracking': tracking_metrics,
                        'requested_frames': count, 'input_frames': len(selected),
                        'input_width': resolution, 'input_height': height,
                        'peak_vram_mb': peak_vram, 'peak_ram_mb': ram.peak / 1024**2,
